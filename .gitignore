@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+config.local.py
+
+# Bot Session Files (Authentication Data)
+*.session
+*.session-journal
+filebot.session
+filebot.session-journal
+
+# Log Files
+*.log
+*.LOG
+TELEGRAM BOT.LOG
+logs/
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+*.json.bak
+
+# IDE & Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS Files
+.DS_Store
+Thumbs.db
+.directory
+
+# Temporary Files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Cache
+.cache/
+*.cache
+
+# Bytecode
+*.pyc
+*.pyo
+__pycache__/
+
+# Replit Files
+.local/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
