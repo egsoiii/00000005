@@ -872,6 +872,49 @@ async def start(client, message):
                 else:
                     return await message.reply_text("<b>❌ Invalid folder link!</b>")
             
+            elif decoded.startswith("ft_"):
+                # File token link format: ft_{token}
+                file_token = decoded[3:]  # Remove "ft_" prefix
+                
+                # Find file by token
+                owner_id, file_idx, file_obj = await db.get_file_by_token(file_token)
+                
+                if owner_id is None or file_obj is None:
+                    return await message.reply_text("<b>❌ Invalid or expired file link!</b>")
+                
+                file_id = file_obj.get('file_id')
+                file_name = file_obj.get('file_name', 'File')
+                is_protected = file_obj.get('protected', False)
+                file_password = file_obj.get('password')
+                
+                # Check if file is password protected
+                if file_password:
+                    # Check if already verified
+                    verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
+                    if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
+                        # Prompt for password
+                        CAPTION_INPUT_MODE[message.from_user.id] = f"verify_file_password_{owner_id}_{file_idx}"
+                        await message.reply_text(
+                            f"<b>🔒 This file is password protected</b>\n\n"
+                            f"<b>📄 {file_name}</b>\n\n"
+                            f"Please enter the password to access this file:\n\n"
+                            f"<i>Send /cancel to cancel</i>",
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                        return
+                
+                # Send the file
+                try:
+                    msg = await client.get_messages(LOG_CHANNEL, int(file_id))
+                    if msg and msg.media:
+                        await msg.copy(message.chat.id, protect_content=is_protected)
+                        return
+                    else:
+                        return await message.reply_text("<b>❌ File not found in storage!</b>")
+                except Exception as e:
+                    logger.error(f"Error sending token file: {e}")
+                    return await message.reply_text("<b>❌ Error sending file!</b>")
+            
             elif decoded.startswith("sharedfile_"):
                 # Shared file link format: sharedfile_{owner_id}_{file_id}
                 parts = decoded.split('_', 2)
@@ -1615,6 +1658,112 @@ async def handle_user_input(client, message):
                     CAPTION_INPUT_MODE[message.from_user.id] = False
                 return
             
+            elif mode.startswith("set_file_password_idx_"):
+                try:
+                    idx = int(mode.split("_")[-1])
+                    password = message.text.strip()
+                    
+                    if not password:
+                        await message.reply_text("<b>❌ Password cannot be empty</b>")
+                        CAPTION_INPUT_MODE[message.from_user.id] = False
+                        return
+                    
+                    if len(password) < 2 or len(password) > 8:
+                        await message.reply_text("<b>❌ Password must be 2-8 characters</b>")
+                        CAPTION_INPUT_MODE[message.from_user.id] = False
+                        return
+                    
+                    user = await db.col.find_one({'id': int(message.from_user.id)})
+                    stored_files = user.get('stored_files', []) if user else []
+                    
+                    if not (0 <= idx < len(stored_files)):
+                        await message.reply_text("<b>❌ File not found</b>")
+                        CAPTION_INPUT_MODE[message.from_user.id] = False
+                        return
+                    
+                    file_name = stored_files[idx].get('file_name', 'File')
+                    
+                    await db.set_file_password(message.from_user.id, idx, password)
+                    CAPTION_INPUT_MODE[message.from_user.id] = False
+                    
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+                    
+                    await message.reply_text(f"<b>🔐 Password set for file: {file_name}</b>\n\nAnyone accessing this file via share link will need to enter this password.")
+                    logger.info(f"Password set for file index {idx} for user {message.from_user.id}")
+                except Exception as e:
+                    logger.error(f"Error setting file password: {e}")
+                    await message.reply_text(f"<b>❌ Error: {str(e)[:50]}</b>")
+                    CAPTION_INPUT_MODE[message.from_user.id] = False
+                return
+            
+            elif mode.startswith("verify_file_password_"):
+                try:
+                    parts = mode.replace("verify_file_password_", "").split("_")
+                    owner_id = int(parts[0])
+                    file_idx = int(parts[1])
+                    
+                    password = message.text.strip()
+                    
+                    # Track password attempts (max 2)
+                    attempt_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
+                    attempts = PASSWORD_ATTEMPTS.get(attempt_key, 0) + 1
+                    PASSWORD_ATTEMPTS[attempt_key] = attempts
+                    
+                    is_valid = await db.verify_file_password(owner_id, file_idx, password)
+                    
+                    if is_valid:
+                        CAPTION_INPUT_MODE[message.from_user.id] = False
+                        PASSWORD_ATTEMPTS.pop(attempt_key, None)
+                        
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        
+                        VERIFIED_FOLDER_ACCESS[f"file_{message.from_user.id}_{owner_id}_{file_idx}"] = True
+                        
+                        # Get file and send it
+                        user_data = await db.col.find_one({'id': int(owner_id)})
+                        stored_files = user_data.get('stored_files', []) if user_data else []
+                        
+                        if 0 <= file_idx < len(stored_files):
+                            file_obj = stored_files[file_idx]
+                            file_id = file_obj.get('file_id')
+                            file_name = file_obj.get('file_name', 'File')
+                            is_protected = file_obj.get('protected', False)
+                            
+                            try:
+                                msg = await client.get_messages(LOG_CHANNEL, int(file_id))
+                                if msg:
+                                    await msg.copy(chat_id=message.from_user.id, protect_content=is_protected)
+                                else:
+                                    await message.reply_text("<b>❌ File not found in storage</b>")
+                            except Exception as e:
+                                logger.error(f"Error sending file after password: {e}")
+                                await message.reply_text(f"<b>❌ Error retrieving file</b>")
+                        else:
+                            await message.reply_text("<b>❌ File not found</b>")
+                    else:
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        
+                        if attempts >= 2:
+                            await message.reply_text("<b>❌ Too many wrong attempts. Access denied.</b>")
+                            CAPTION_INPUT_MODE[message.from_user.id] = False
+                            PASSWORD_ATTEMPTS.pop(attempt_key, None)
+                        else:
+                            await message.reply_text(f"<b>❌ Wrong password. Attempt {attempts}/2</b>\n\nPlease try again or send /cancel to cancel.")
+                except Exception as e:
+                    logger.error(f"Error verifying file password: {e}")
+                    await message.reply_text(f"<b>❌ Error: {str(e)[:50]}</b>")
+                    CAPTION_INPUT_MODE[message.from_user.id] = False
+                return
+            
             elif mode.startswith("verify_folder_password_"):
                 try:
                     parts = mode.replace("verify_folder_password_", "").split("_")
@@ -1950,7 +2099,7 @@ async def handle_user_input(client, message):
 async def callback(client, query):
     try:
         # Answer callback immediately for faster response (unless specific handlers need custom answers)
-        if not query.data.startswith(("stop_batch_", "toggle_clone", "remove_dest_", "toggle_dest_enable_", "sel_folder_", "confirm_del_", "select_topic_", "del_replace_", "del_remove_", "mode_", "file_share_", "change_file_folder_", "view_folder_password_", "confirm_remove_password_", "remove_folder_password_", "confirm_change_link_", "cancel_change_link_")):
+        if not query.data.startswith(("stop_batch_", "toggle_clone", "remove_dest_", "toggle_dest_enable_", "sel_folder_", "confirm_del_", "select_topic_", "del_replace_", "del_remove_", "mode_", "file_share_", "change_file_folder_", "view_folder_password_", "confirm_remove_password_", "remove_folder_password_", "confirm_change_link_", "cancel_change_link_", "view_file_password_", "confirm_remove_file_password_", "remove_file_password_", "change_file_link_", "confirm_change_file_link_", "set_file_password_")):
             await query.answer()
         
         if query.data.startswith("stop_batch_"):
@@ -5044,23 +5193,46 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 if 0 <= file_idx < len(stored_files):
                     file_name = stored_files[file_idx].get('file_name', 'File')
                     username = (await client.get_me()).username
-                    string = f'file_{file_idx}'
+                    
+                    # Check if file has a custom token, otherwise use default
+                    file_token = stored_files[file_idx].get('access_token')
+                    if file_token:
+                        string = f'ft_{file_token}'
+                    else:
+                        string = f'file_{file_idx}'
                     encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
                     link = f"https://t.me/{username}?start={encoded}"
+                    
+                    # Check if file is password protected
+                    is_password_protected = stored_files[file_idx].get('password') is not None
+                    
+                    # Build buttons
+                    inline_buttons = [
+                        [{"text": "Copy file link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
+                        [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}]
+                    ]
+                    
+                    # Password buttons - show View and Remove if protected, else show Set
+                    if is_password_protected:
+                        inline_buttons.append([
+                            {"text": "👁️ View Password", "callback_data": f"view_file_password_{file_idx}"},
+                            {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_file_password_{file_idx}"}
+                        ])
+                    else:
+                        inline_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}])
+                    
+                    inline_buttons.append([{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}])
+                    
+                    protection_status = "🔒 Password Protected" if is_password_protected else ""
                     
                     # Use raw API to support copy_text feature
                     api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
                     payload = {
                         "chat_id": query.from_user.id,
                         "message_id": query.message.id,
-                        "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
+                        "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:",
                         "parse_mode": "HTML",
-                        "reply_markup": {
-                            "inline_keyboard": [
-                                [{"text": "Copy file link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
-                                [{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}]
-                            ]
-                        }
+                        "reply_markup": {"inline_keyboard": inline_buttons}
                     }
                     
                     async with aiohttp.ClientSession() as session:
@@ -5072,14 +5244,9 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                                 payload = {
                                     "chat_id": query.from_user.id,
                                     "message_id": query.message.id,
-                                    "caption": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
+                                    "caption": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:",
                                     "parse_mode": "HTML",
-                                    "reply_markup": {
-                                        "inline_keyboard": [
-                                            [{"text": "Copy file link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
-                                            [{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}]
-                                        ]
-                                    }
+                                    "reply_markup": {"inline_keyboard": inline_buttons}
                                 }
                                 async with session.post(api_url, json=payload) as resp2:
                                     result2 = await resp2.json()
@@ -5237,6 +5404,219 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     await query.answer()
             except Exception as e:
                 logger.error(f"Cancel delete error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("set_file_password_"):
+            # Set password for file - prompt user for password
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                user = await db.col.find_one({'id': int(query.from_user.id)})
+                stored_files = user.get('stored_files', []) if user else []
+                
+                if 0 <= file_idx < len(stored_files):
+                    file_name = stored_files[file_idx].get('file_name', 'File')
+                    CAPTION_INPUT_MODE[query.from_user.id] = f"set_file_password_idx_{file_idx}"
+                    await query.message.reply_text(
+                        f"<b>🔐 Set Password for: {file_name}</b>\n\n"
+                        f"Send the password you want to set for this file.\n"
+                        f"Password must be 2-8 characters.\n"
+                        f"Anyone accessing this file via share link will need to enter this password.\n\n"
+                        f"<i>Send /cancel to cancel</i>",
+                        parse_mode=enums.ParseMode.HTML
+                    )
+                    await query.answer()
+            except Exception as e:
+                logger.error(f"Set file password error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("view_file_password_"):
+            # View file password (show to owner)
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                password = await db.get_file_password(query.from_user.id, file_idx)
+                if password:
+                    await query.answer(f"🔐 Password: {password}", show_alert=True)
+                else:
+                    await query.answer("No password set", show_alert=True)
+            except Exception as e:
+                logger.error(f"View file password error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("confirm_remove_file_password_"):
+            # Confirm removal of file password
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                user = await db.col.find_one({'id': int(query.from_user.id)})
+                stored_files = user.get('stored_files', []) if user else []
+                
+                if 0 <= file_idx < len(stored_files):
+                    file_name = stored_files[file_idx].get('file_name', 'File')
+                    
+                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                    payload = {
+                        "chat_id": query.from_user.id,
+                        "message_id": query.message.id,
+                        "text": f"<b>⚠️ Remove Password Protection?</b>\n\n<b>📄 {file_name}</b>\n\nAnyone with the link will be able to access this file without entering a password.",
+                        "parse_mode": "HTML",
+                        "reply_markup": {
+                            "inline_keyboard": [
+                                [{"text": "✅ Yes, Remove", "callback_data": f"remove_file_password_{file_idx}"}, {"text": "❌ Cancel", "callback_data": f"file_share_{file_idx}"}]
+                            ]
+                        }
+                    }
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(api_url, json=payload) as resp:
+                            await resp.json()
+                    
+                    await query.answer()
+            except Exception as e:
+                logger.error(f"Confirm remove file password error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("remove_file_password_"):
+            # Remove file password
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                success = await db.remove_file_password(query.from_user.id, file_idx)
+                
+                if success:
+                    await query.answer("✅ Password removed!", show_alert=False)
+                    # Refresh share menu
+                    user = await db.col.find_one({'id': int(query.from_user.id)})
+                    stored_files = user.get('stored_files', []) if user else []
+                    
+                    if 0 <= file_idx < len(stored_files):
+                        file_name = stored_files[file_idx].get('file_name', 'File')
+                        username = (await client.get_me()).username
+                        
+                        file_token = stored_files[file_idx].get('access_token')
+                        if file_token:
+                            string = f'ft_{file_token}'
+                        else:
+                            string = f'file_{file_idx}'
+                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                        link = f"https://t.me/{username}?start={encoded}"
+                        
+                        inline_buttons = [
+                            [{"text": "Copy file link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
+                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}],
+                            [{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}],
+                            [{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}]
+                        ]
+                        
+                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                        payload = {
+                            "chat_id": query.from_user.id,
+                            "message_id": query.message.id,
+                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
+                            "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": inline_buttons}
+                        }
+                        
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(api_url, json=payload) as resp:
+                                await resp.json()
+                else:
+                    await query.answer("Error removing password", show_alert=True)
+            except Exception as e:
+                logger.error(f"Remove file password error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("change_file_link_"):
+            # Ask for confirmation before changing file link
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                user = await db.col.find_one({'id': int(query.from_user.id)})
+                stored_files = user.get('stored_files', []) if user else []
+                
+                if 0 <= file_idx < len(stored_files):
+                    file_name = stored_files[file_idx].get('file_name', 'File')
+                    
+                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                    payload = {
+                        "chat_id": query.from_user.id,
+                        "message_id": query.message.id,
+                        "text": f"<b>⚠️ Change File Link?</b>\n\n<b>📄 {file_name}</b>\n\nThis will generate a new link and <b>invalidate the old link</b>.\nAnyone with the old link will no longer be able to access this file.",
+                        "parse_mode": "HTML",
+                        "reply_markup": {
+                            "inline_keyboard": [
+                                [{"text": "✅ Yes, Change Link", "callback_data": f"confirm_change_file_link_{file_idx}"}, {"text": "❌ Cancel", "callback_data": f"file_share_{file_idx}"}]
+                            ]
+                        }
+                    }
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(api_url, json=payload) as resp:
+                            await resp.json()
+                    
+                    await query.answer()
+            except Exception as e:
+                logger.error(f"Change file link error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("confirm_change_file_link_"):
+            # Generate new token for file
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                new_token = await db.change_file_token(query.from_user.id, file_idx)
+                
+                if new_token:
+                    await query.answer("✅ Link changed!", show_alert=False)
+                    
+                    # Refresh share menu with new link
+                    user = await db.col.find_one({'id': int(query.from_user.id)})
+                    stored_files = user.get('stored_files', []) if user else []
+                    
+                    if 0 <= file_idx < len(stored_files):
+                        file_name = stored_files[file_idx].get('file_name', 'File')
+                        username = (await client.get_me()).username
+                        
+                        string = f'ft_{new_token}'
+                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                        link = f"https://t.me/{username}?start={encoded}"
+                        
+                        is_password_protected = stored_files[file_idx].get('password') is not None
+                        
+                        inline_buttons = [
+                            [{"text": "Copy file link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
+                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}]
+                        ]
+                        
+                        if is_password_protected:
+                            inline_buttons.append([
+                                {"text": "👁️ View Password", "callback_data": f"view_file_password_{file_idx}"},
+                                {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_file_password_{file_idx}"}
+                            ])
+                        else:
+                            inline_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}])
+                        
+                        inline_buttons.append([{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}])
+                        
+                        protection_status = "🔒 Password Protected" if is_password_protected else ""
+                        
+                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                        payload = {
+                            "chat_id": query.from_user.id,
+                            "message_id": query.message.id,
+                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:",
+                            "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": inline_buttons}
+                        }
+                        
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(api_url, json=payload) as resp:
+                                await resp.json()
+                else:
+                    await query.answer("Error changing link", show_alert=True)
+            except Exception as e:
+                logger.error(f"Confirm change file link error: {e}")
                 await query.answer("Error", show_alert=True)
             return
         

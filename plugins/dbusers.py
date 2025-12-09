@@ -729,5 +729,110 @@ class Database:
         if owner_id is None:
             return None
         return {'owner_id': owner_id, 'folder_name': folder_name}
+    
+    # ============ FILE PASSWORD PROTECTION ============
+    
+    async def set_file_password(self, user_id, file_idx, password):
+        """Set password protection for a file (stored in plain text, 2-8 chars)"""
+        if len(password) < 2 or len(password) > 8:
+            return False
+        
+        user = await self._get_user_cached(user_id)
+        if not user:
+            return False
+        
+        files = user.get('stored_files', [])
+        if 0 <= file_idx < len(files):
+            files[file_idx]['password'] = password
+            await self.col.update_one({'id': int(user_id)}, {'$set': {'stored_files': files}})
+            self._cache.invalidate(user_id)
+            return True
+        return False
+    
+    async def remove_file_password(self, user_id, file_idx):
+        """Remove password protection from a file"""
+        user = await self._get_user_cached(user_id)
+        if not user:
+            return False
+        
+        files = user.get('stored_files', [])
+        if 0 <= file_idx < len(files):
+            if 'password' in files[file_idx]:
+                del files[file_idx]['password']
+            await self.col.update_one({'id': int(user_id)}, {'$set': {'stored_files': files}})
+            self._cache.invalidate(user_id)
+            return True
+        return False
+    
+    async def get_file_password(self, user_id, file_idx):
+        """Get password for a file (returns None if not set)"""
+        user = await self._get_user_cached(user_id)
+        if not user:
+            return None
+        
+        files = user.get('stored_files', [])
+        if 0 <= file_idx < len(files):
+            return files[file_idx].get('password')
+        return None
+    
+    async def verify_file_password(self, user_id, file_idx, password):
+        """Verify password for a file (plain text comparison)"""
+        stored_password = await self.get_file_password(user_id, file_idx)
+        if stored_password is None:
+            return True
+        return password == stored_password
+    
+    async def is_file_password_protected(self, user_id, file_idx):
+        """Check if file has password protection"""
+        password = await self.get_file_password(user_id, file_idx)
+        return password is not None
+    
+    # ============ FILE TOKEN/LINK MANAGEMENT ============
+    
+    async def generate_file_token(self, user_id, file_idx):
+        """Generate a unique token for file access"""
+        import secrets
+        import datetime
+        
+        user = await self._get_user_cached(user_id)
+        if not user:
+            return None
+        
+        files = user.get('stored_files', [])
+        if 0 <= file_idx < len(files):
+            token = secrets.token_urlsafe(16)
+            files[file_idx]['access_token'] = token
+            files[file_idx]['token_created'] = datetime.datetime.now()
+            await self.col.update_one({'id': int(user_id)}, {'$set': {'stored_files': files}})
+            self._cache.invalidate(user_id)
+            return token
+        return None
+    
+    async def get_file_token(self, user_id, file_idx):
+        """Get existing access token for a file"""
+        user = await self._get_user_cached(user_id)
+        if not user:
+            return None
+        
+        files = user.get('stored_files', [])
+        if 0 <= file_idx < len(files):
+            return files[file_idx].get('access_token')
+        return None
+    
+    async def change_file_token(self, user_id, file_idx):
+        """Change/regenerate the file access token (invalidates old link)"""
+        return await self.generate_file_token(user_id, file_idx)
+    
+    async def get_file_by_token(self, token):
+        """Find file and owner by access token. Returns (user_id, file_idx, file_obj) or (None, None, None)"""
+        user = await self.col.find_one({'stored_files.access_token': token})
+        if not user:
+            return None, None, None
+        
+        files = user.get('stored_files', [])
+        for idx, file_obj in enumerate(files):
+            if file_obj.get('access_token') == token:
+                return user['id'], idx, file_obj
+        return None, None, None
 
 db = Database(DB_URI, DB_NAME)
