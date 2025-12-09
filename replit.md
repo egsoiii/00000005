@@ -84,6 +84,25 @@ Folders can be shared via secure token-based links that don't expose the owner's
 3. "Change Link" generates a new token, making the old link invalid
 4. Recipients access the folder by clicking the link (password required if set)
 
+## Token-Based File Links with Password Protection
+
+Individual files can be shared via secure token-based links with optional password protection:
+
+- **Link Format**: `https://t.me/botname?start=ft_TOKEN`
+- **Token Generation**: Each file gets a unique random token when first shared
+- **Change Link**: Users can regenerate the token to invalidate all previous links
+- **Password Protection**: Files can optionally have password protection (2-8 characters)
+- **Password Storage**: Passwords are stored in plain text for owner viewing
+
+### How It Works
+1. When a user clicks "Share" on a file, they see options:
+   - "Set Password" / "View Password" / "Remove Password" for password management
+   - "Copy Link" to copy the current token-based share link
+   - "Change Link" to generate a new token (invalidates old links)
+2. Password requirements: minimum 2 characters, maximum 8 characters
+3. Recipients must enter the password when accessing password-protected files
+4. File owners can view their set passwords at any time
+
 ## Tech Stack
 
 - Python 3.11
