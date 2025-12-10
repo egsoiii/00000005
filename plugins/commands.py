@@ -5532,23 +5532,15 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 if 0 <= file_idx < len(stored_files):
                     file_name = stored_files[file_idx].get('file_name', 'File')
                     
-                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                    payload = {
-                        "chat_id": query.from_user.id,
-                        "message_id": query.message.id,
-                        "text": f"<b>⚠️ Remove Password Protection?</b>\n\n<b>📄 {file_name}</b>\n\nAnyone with the link will be able to access this file without entering a password.",
-                        "parse_mode": "HTML",
-                        "reply_markup": {
-                            "inline_keyboard": [
-                                [{"text": "✅ Yes, Remove", "callback_data": f"remove_file_password_{file_idx}"}, {"text": "❌ Cancel", "callback_data": f"file_share_{file_idx}"}]
-                            ]
-                        }
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(api_url, json=payload) as resp:
-                            await resp.json()
-                    
+                    buttons = [
+                        [InlineKeyboardButton('✅ Yes, Remove', callback_data=f'remove_file_password_{file_idx}'), 
+                         InlineKeyboardButton('❌ Cancel', callback_data=f'file_share_{file_idx}')]
+                    ]
+                    await query.message.edit_text(
+                        f"<b>⚠️ Remove Password Protection?</b>\n\n<b>📄 {file_name}</b>\n\nAnyone with the link will be able to access this file without entering a password.",
+                        reply_markup=InlineKeyboardMarkup(buttons),
+                        parse_mode=enums.ParseMode.HTML
+                    )
                     await query.answer()
             except Exception as e:
                 logger.error(f"Confirm remove file password error: {e}")
