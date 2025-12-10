@@ -4690,16 +4690,15 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 username = (await client.get_me()).username
                 share_link = f"https://t.me/{username}?start=folder_{new_token}"
                 
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
                 is_protected = await db.is_folder_password_protected(query.from_user.id, folder_name)
                 
-                # Build updated buttons with desired layout
+                # Show share menu (like files do) - only share-related options
                 raw_buttons = [
-                    # Row 1: Copy folder link, Change Link
-                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
+                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
+                    [{"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
                 ]
                 
-                # Row 2: Password buttons - show View and Remove if protected, else show Set
+                # Password buttons - show View and Remove if protected, else show Set
                 if is_protected:
                     raw_buttons.append([
                         {"text": "👁️ View Password", "callback_data": f"view_folder_password_{idx}"},
@@ -4708,17 +4707,11 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 else:
                     raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
                 
-                # Row 3: Rename, Delete
-                raw_buttons.append([
-                    {"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"},
-                    {"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}
-                ])
-                
-                # Row 4: Back
-                raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
+                # Back to edit folder menu
+                raw_buttons.append([{"text": "⋞ Back", "callback_data": f"edit_folder_{idx}"}])
                 
                 protection_status = "🔒 Password Protected" if is_protected else ""
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
+                edit_text = f"<b>📤 Share Folder</b>\n\n<b>📁 {display_name}</b>\n{protection_status}\n\nShare this folder with others using the link below:"
                 
                 api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
                 payload = {
@@ -4925,8 +4918,6 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 await db.remove_folder_password(query.from_user.id, folder_name)
                 await query.answer("✅ Password deleted successfully!", show_alert=True)
                 
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-                
                 # Get or generate token-based share link (no owner ID in link)
                 token = await db.get_folder_token(query.from_user.id, folder_name)
                 if not token:
@@ -4935,16 +4926,15 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 username = (await client.get_me()).username
                 share_link = f"https://t.me/{username}?start=folder_{token}"
                 
+                # Show share menu (like files do) - only share-related options
                 raw_buttons = [
-                    [{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}],
                     [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
+                    [{"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
                     [{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}],
-                    [{"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}],
-                    [{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}]
+                    [{"text": "⋞ Back", "callback_data": f"edit_folder_{idx}"}]
                 ]
                 
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n\nSelect an option:"
+                edit_text = f"<b>📤 Share Folder</b>\n\n<b>📁 {display_name}</b>\n\nShare this folder with others using the link below:"
                 
                 # Try editMessageText first, then editMessageCaption
                 api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
