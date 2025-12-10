@@ -574,13 +574,18 @@ class Database:
     
     async def set_folder_password(self, user_id, folder_name, password):
         """Set password protection for a folder (password is hashed with bcrypt)"""
-        user = await self._get_user_cached(user_id)
+        # Invalidate cache first to ensure fresh read
+        self._cache.invalidate(user_id)
+        
+        # Get fresh data directly from database
+        user = await self.col.find_one({'id': int(user_id)})
         if not user:
             return False
         
         hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         
-        folders = user.get('folders', [])
+        # Create a deep copy of folders to avoid cache mutation issues
+        folders = copy.deepcopy(user.get('folders', []))
         for folder in folders:
             fname = folder.get('name', str(folder)) if isinstance(folder, dict) else str(folder)
             if fname == folder_name:
@@ -590,6 +595,7 @@ class Database:
                 break
         
         await self.col.update_one({'id': int(user_id)}, {'$set': {'folders': folders}})
+        # Invalidate cache again after update to ensure fresh reads
         self._cache.invalidate(user_id)
         return True
     
