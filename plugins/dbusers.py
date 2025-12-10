@@ -2,6 +2,7 @@
 import motor.motor_asyncio
 import time
 import bcrypt
+import copy
 from config import DB_NAME, DB_URI
 
 CACHE_TTL = 300
@@ -594,11 +595,17 @@ class Database:
     
     async def remove_folder_password(self, user_id, folder_name):
         """Remove password protection from a folder"""
-        user = await self._get_user_cached(user_id)
+        # Invalidate cache first to ensure fresh read
+        self._cache.invalidate(user_id)
+        
+        # Get fresh data directly from database
+        user = await self.col.find_one({'id': int(user_id)})
         if not user:
             return False
         
-        folders = user.get('folders', [])
+        # Create a deep copy of folders to avoid cache mutation issues
+        folders = copy.deepcopy(user.get('folders', []))
+        
         for folder in folders:
             fname = folder.get('name', str(folder)) if isinstance(folder, dict) else str(folder)
             if fname == folder_name:
@@ -610,6 +617,7 @@ class Database:
                 break
         
         await self.col.update_one({'id': int(user_id)}, {'$set': {'folders': folders}})
+        # Invalidate cache again after update to ensure fresh reads
         self._cache.invalidate(user_id)
         return True
     
