@@ -32,6 +32,65 @@ PASSWORD_ATTEMPTS = {}  # Track password attempt counts: {user_id_owner_id_folde
 PASSWORD_PROMPT_MESSAGES = {}  # Track password prompt message IDs: {user_id: [msg_ids]}
 PASSWORD_RESPONSE_MESSAGES = {}  # Track password response message IDs: {user_id: [msg_ids]}
 
+async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, display_name):
+    """Shared helper to show the folder edit menu with consistent button layout"""
+    from plugins.dbusers import db
+    
+    # Get or generate token-based share link
+    token = await db.get_folder_token(user_id, folder_name)
+    if not token:
+        token = await db.generate_folder_token(user_id, folder_name)
+    
+    username = (await client.get_me()).username
+    share_link = f"https://t.me/{username}?start=folder_{token}"
+    
+    folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+    is_protected = await db.is_folder_password_protected(user_id, folder_name)
+    
+    # Build consistent button layout
+    raw_buttons = [
+        [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
+    ]
+    
+    if is_protected:
+        raw_buttons.append([
+            {"text": "👁️ View Password", "callback_data": f"view_folder_password_{idx}"},
+            {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_password_{idx}"}
+        ])
+    else:
+        raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
+    
+    raw_buttons.append([{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}, {"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}])
+    raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
+    
+    protection_status = "🔒 Password Protected" if is_protected else ""
+    edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
+    
+    # Send using raw API for copy_text support
+    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+    payload = {
+        "chat_id": user_id,
+        "message_id": message_id,
+        "text": edit_text,
+        "parse_mode": "HTML",
+        "reply_markup": {"inline_keyboard": raw_buttons}
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(api_url, json=payload) as resp:
+            result = await resp.json()
+            if not result.get("ok"):
+                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
+                payload = {
+                    "chat_id": user_id,
+                    "message_id": message_id,
+                    "caption": edit_text,
+                    "parse_mode": "HTML",
+                    "reply_markup": {"inline_keyboard": raw_buttons}
+                }
+                async with session.post(api_url, json=payload) as resp2:
+                    await resp2.json()
+
 def get_size(size):
     """Get size in readable format"""
 
@@ -4586,76 +4645,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 f = folders[idx]
                 folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 display_name = await db.get_folder_display_name(folder_name)
-                
-                # Get or generate token-based share link (no owner ID in link)
-                token = await db.get_folder_token(query.from_user.id, folder_name)
-                if not token:
-                    token = await db.generate_folder_token(query.from_user.id, folder_name)
-                
-                username = (await client.get_me()).username
-                share_link = f"https://t.me/{username}?start=folder_{token}"
-                
-                # Back button path
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-                
-                # Check if folder has password protection
-                is_protected = await db.is_folder_password_protected(query.from_user.id, folder_name)
-                
-                # Build raw buttons with desired layout
-                raw_buttons = [
-                    # Row 1: Copy folder link, Change Link
-                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
-                ]
-                
-                # Row 2: Password buttons - show View and Remove if protected, else show Set
-                if is_protected:
-                    raw_buttons.append([
-                        {"text": "👁️ View Password", "callback_data": f"view_folder_password_{idx}"},
-                        {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_password_{idx}"}
-                    ])
-                else:
-                    raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
-                
-                # Row 3: Rename, Delete
-                raw_buttons.append([
-                    {"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"},
-                    {"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}
-                ])
-                
-                # Row 4: Back
-                raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
-                
-                protection_status = "🔒 Password Protected" if is_protected else ""
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
-                
-                # Try editMessageText first, then editMessageCaption
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                payload = {
-                    "chat_id": query.from_user.id,
-                    "message_id": query.message.id,
-                    "text": edit_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": {"inline_keyboard": raw_buttons}
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(api_url, json=payload) as resp:
-                        result = await resp.json()
-                        if not result.get("ok"):
-                            # Try editMessageCaption if text edit fails
-                            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                            payload = {
-                                "chat_id": query.from_user.id,
-                                "message_id": query.message.id,
-                                "caption": edit_text,
-                                "parse_mode": "HTML",
-                                "reply_markup": {"inline_keyboard": raw_buttons}
-                            }
-                            async with session.post(api_url, json=payload) as resp2:
-                                result2 = await resp2.json()
-                                if not result2.get("ok"):
-                                    logger.error(f"Edit folder error: {result2.get('description')}")
-                
+                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name)
                 await query.answer()
             return
         
@@ -4686,53 +4676,8 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 display_name = await db.get_folder_display_name(folder_name)
                 
                 # Generate new token (invalidates old one)
-                new_token = await db.change_folder_token(query.from_user.id, folder_name)
-                username = (await client.get_me()).username
-                share_link = f"https://t.me/{username}?start=folder_{new_token}"
-                
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-                is_protected = await db.is_folder_password_protected(query.from_user.id, folder_name)
-                
-                # Go back to edit folder menu (main menu)
-                raw_buttons = [
-                    [{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}],
-                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
-                ]
-                
-                # Password buttons - show View and Remove if protected, else show Set
-                if is_protected:
-                    raw_buttons.append([
-                        {"text": "👁️ View Password", "callback_data": f"view_folder_password_{idx}"},
-                        {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_password_{idx}"}
-                    ])
-                else:
-                    raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
-                
-                raw_buttons.append([{"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}])
-                raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
-                
-                protection_status = "🔒 Password Protected\n" if is_protected else ""
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\nSelect an option:"
-                
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                payload = {
-                    "chat_id": query.from_user.id,
-                    "message_id": query.message.id,
-                    "text": edit_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": {"inline_keyboard": raw_buttons}
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(api_url, json=payload) as resp:
-                        result = await resp.json()
-                        if not result.get("ok"):
-                            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                            payload["caption"] = payload.pop("text")
-                            async with session.post(api_url, json=payload) as resp2:
-                                await resp2.json()
-                
+                await db.change_folder_token(query.from_user.id, folder_name)
+                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name)
                 await query.answer("✅ Link changed successfully.\n\nOld links are invalid now.", show_alert=True)
             return
         
@@ -4744,58 +4689,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 f = folders[idx]
                 folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 display_name = await db.get_folder_display_name(folder_name)
-                
-                # Get token for share link
-                token = await db.get_folder_token(query.from_user.id, folder_name)
-                if not token:
-                    token = await db.generate_folder_token(query.from_user.id, folder_name)
-                
-                username = (await client.get_me()).username
-                share_link = f"https://t.me/{username}?start=folder_{token}"
-                
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-                is_protected = await db.is_folder_password_protected(query.from_user.id, folder_name)
-                
-                raw_buttons = [
-                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
-                ]
-                
-                if is_protected:
-                    raw_buttons.append([
-                        {"text": "👁️ View Password", "callback_data": f"view_folder_password_{idx}"},
-                        {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_password_{idx}"}
-                    ])
-                else:
-                    raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
-                
-                raw_buttons.append([
-                    {"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"},
-                    {"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}
-                ])
-                
-                raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
-                
-                protection_status = "🔒 Password Protected" if is_protected else ""
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
-                
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                payload = {
-                    "chat_id": query.from_user.id,
-                    "message_id": query.message.id,
-                    "text": edit_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": {"inline_keyboard": raw_buttons}
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(api_url, json=payload) as resp:
-                        result = await resp.json()
-                        if not result.get("ok"):
-                            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                            payload["caption"] = payload.pop("text")
-                            async with session.post(api_url, json=payload) as resp2:
-                                await resp2.json()
-                
+                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name)
                 await query.answer()
             return
         
@@ -4918,55 +4812,8 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 display_name = await db.get_folder_display_name(folder_name)
                 await db.remove_folder_password(query.from_user.id, folder_name)
+                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name)
                 await query.answer("✅ Password deleted successfully!", show_alert=True)
-                
-                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-                
-                # Get or generate token-based share link (no owner ID in link)
-                token = await db.get_folder_token(query.from_user.id, folder_name)
-                if not token:
-                    token = await db.generate_folder_token(query.from_user.id, folder_name)
-                
-                username = (await client.get_me()).username
-                share_link = f"https://t.me/{username}?start=folder_{token}"
-                
-                # Go back to edit folder menu (main menu)
-                raw_buttons = [
-                    [{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}],
-                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
-                    [{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}],
-                    [{"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}],
-                    [{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}]
-                ]
-                
-                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n\nSelect an option:"
-                
-                # Try editMessageText first, then editMessageCaption
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                payload = {
-                    "chat_id": query.from_user.id,
-                    "message_id": query.message.id,
-                    "text": edit_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": {"inline_keyboard": raw_buttons}
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(api_url, json=payload) as resp:
-                        result = await resp.json()
-                        if not result.get("ok"):
-                            # Try editMessageCaption if text edit fails
-                            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                            payload = {
-                                "chat_id": query.from_user.id,
-                                "message_id": query.message.id,
-                                "caption": edit_text,
-                                "parse_mode": "HTML",
-                                "reply_markup": {"inline_keyboard": raw_buttons}
-                            }
-                            async with session.post(api_url, json=payload) as resp2:
-                                await resp2.json()
             return
         
         elif query.data.startswith("folder_"):
