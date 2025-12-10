@@ -5598,19 +5598,28 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
                         link = f"https://t.me/{username}?start={encoded}"
                         
-                        # Use Pyrogram buttons (without copy_text feature for compatibility)
-                        buttons = [
-                            [InlineKeyboardButton('📋 Copy Link', callback_data=f'show_file_link_{file_idx}'), InlineKeyboardButton('📥 Open Link', url=link)],
-                            [InlineKeyboardButton('♻️ Change Link', callback_data=f'change_file_link_{file_idx}')],
-                            [InlineKeyboardButton('🔐 Set Password', callback_data=f'set_file_password_{file_idx}')],
-                            [InlineKeyboardButton('⋞ Back', callback_data=f'share_back_{file_idx}')]
+                        # Use raw API for copy_text feature with token-based link
+                        inline_buttons = [
+                            [{"text": "📋 Copy Link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
+                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}],
+                            [{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}],
+                            [{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}]
                         ]
                         
-                        await query.message.edit_text(
-                            f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\n<b>🔗 Link:</b> <code>{link}</code>\n\nShare this file with others using the link above:",
-                            reply_markup=InlineKeyboardMarkup(buttons),
-                            parse_mode=enums.ParseMode.HTML
-                        )
+                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                        payload = {
+                            "chat_id": query.from_user.id,
+                            "message_id": query.message.id,
+                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
+                            "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": inline_buttons}
+                        }
+                        
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(api_url, json=payload) as resp:
+                                result = await resp.json()
+                                if not result.get('ok'):
+                                    logger.error(f"Edit message failed: {result}")
                 else:
                     await query.answer("Error removing password", show_alert=True)
             except Exception as e:
@@ -5666,28 +5675,38 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         
                         is_password_protected = stored_files[file_idx].get('password') is not None
                         
-                        buttons = [
-                            [InlineKeyboardButton('📋 Copy Link', callback_data=f'show_file_link_{file_idx}'), InlineKeyboardButton('📥 Open Link', url=link)],
-                            [InlineKeyboardButton('♻️ Change Link', callback_data=f'change_file_link_{file_idx}')]
+                        # Use raw API for copy_text feature with token-based link
+                        inline_buttons = [
+                            [{"text": "📋 Copy Link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
+                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}]
                         ]
                         
                         if is_password_protected:
-                            buttons.append([
-                                InlineKeyboardButton('👁️ View Password', callback_data=f'view_file_password_{file_idx}'),
-                                InlineKeyboardButton('🗑️ Remove Password', callback_data=f'confirm_remove_file_password_{file_idx}')
+                            inline_buttons.append([
+                                {"text": "👁️ View Password", "callback_data": f"view_file_password_{file_idx}"},
+                                {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_file_password_{file_idx}"}
                             ])
                         else:
-                            buttons.append([InlineKeyboardButton('🔐 Set Password', callback_data=f'set_file_password_{file_idx}')])
+                            inline_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}])
                         
-                        buttons.append([InlineKeyboardButton('⋞ Back', callback_data=f'share_back_{file_idx}')])
+                        inline_buttons.append([{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}])
                         
                         protection_status = "🔒 Password Protected\n" if is_password_protected else ""
                         
-                        await query.message.edit_text(
-                            f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n<b>🔗 Link:</b> <code>{link}</code>\n\nShare this file with others using the link above:",
-                            reply_markup=InlineKeyboardMarkup(buttons),
-                            parse_mode=enums.ParseMode.HTML
-                        )
+                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+                        payload = {
+                            "chat_id": query.from_user.id,
+                            "message_id": query.message.id,
+                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\nShare this file with others using the link below:",
+                            "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": inline_buttons}
+                        }
+                        
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(api_url, json=payload) as resp:
+                                result = await resp.json()
+                                if not result.get('ok'):
+                                    logger.error(f"Edit message failed: {result}")
                 else:
                     await query.answer("Error changing link", show_alert=True)
             except Exception as e:
