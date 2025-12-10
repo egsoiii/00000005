@@ -921,10 +921,38 @@ async def start(client, message):
                 if len(parts) >= 3:
                     owner_id = int(parts[1])
                     file_id = parts[2]
+                    
+                    # Find file index in owner's stored_files to check password
+                    user_data = await db.col.find_one({'id': int(owner_id)})
+                    stored_files = user_data.get('stored_files', []) if user_data else []
+                    file_idx = None
+                    file_obj = None
+                    for idx, f in enumerate(stored_files):
+                        if str(f.get('file_id')) == str(file_id):
+                            file_idx = idx
+                            file_obj = f
+                            break
+                    
+                    # Check if file is password protected
+                    if file_obj and file_obj.get('password'):
+                        verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
+                        if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
+                            file_name = file_obj.get('file_name', 'File')
+                            CAPTION_INPUT_MODE[message.from_user.id] = f"verify_file_password_{owner_id}_{file_idx}"
+                            await message.reply_text(
+                                f"<b>🔒 This file is password protected</b>\n\n"
+                                f"<b>📄 {file_name}</b>\n\n"
+                                f"Please enter the password to access this file:\n\n"
+                                f"<i>Send /cancel to cancel</i>",
+                                parse_mode=enums.ParseMode.HTML
+                            )
+                            return
+                    
+                    is_protected = file_obj.get('protected', False) if file_obj else False
                     try:
                         msg = await client.get_messages(LOG_CHANNEL, int(file_id))
                         if msg and msg.media:
-                            await msg.copy(message.chat.id)
+                            await msg.copy(message.chat.id, protect_content=is_protected)
                             return
                         else:
                             return await message.reply_text("<b>❌ File not found!</b>")
@@ -949,7 +977,24 @@ async def start(client, message):
                 stored_files = user.get('stored_files', []) if user else []
                 
                 if 0 <= file_index < len(stored_files):
-                    msg_id = stored_files[file_index]['file_id']
+                    file_obj = stored_files[file_index]
+                    
+                    # Check if file is password protected
+                    if file_obj.get('password'):
+                        verify_key = f"file_{message.from_user.id}_{message.from_user.id}_{file_index}"
+                        if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
+                            file_name = file_obj.get('file_name', 'File')
+                            CAPTION_INPUT_MODE[message.from_user.id] = f"verify_file_password_{message.from_user.id}_{file_index}"
+                            await message.reply_text(
+                                f"<b>🔒 This file is password protected</b>\n\n"
+                                f"<b>📄 {file_name}</b>\n\n"
+                                f"Please enter the password to access this file:\n\n"
+                                f"<i>Send /cancel to cancel</i>",
+                                parse_mode=enums.ParseMode.HTML
+                            )
+                            return
+                    
+                    msg_id = file_obj['file_id']
                 else:
                     return await message.reply_text("<b>❌ File not found!</b>")
             else:
