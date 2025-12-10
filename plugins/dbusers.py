@@ -629,7 +629,8 @@ class Database:
     
     async def get_folder_password(self, user_id, folder_name):
         """Get password for a folder (returns None if not set)"""
-        user = await self._get_user_cached(user_id)
+        # Always read directly from database to avoid stale cache issues
+        user = await self.col.find_one({'id': int(user_id)})
         if not user:
             return None
         
@@ -643,7 +644,8 @@ class Database:
     
     async def get_folder_password_plain(self, user_id, folder_name):
         """Get plain text password for a folder (returns None if not set)"""
-        user = await self._get_user_cached(user_id)
+        # Always read directly from database to avoid stale cache issues
+        user = await self.col.find_one({'id': int(user_id)})
         if not user:
             return None
         
