@@ -31,8 +31,16 @@ args = "PORT=8080 python bot.py"
 waitForPort = 8080
 
 [[ports]]
+localPort = 3000
+externalPort = 3000
+
+[[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
 
 [[ports]]
 localPort = 33215
@@ -41,6 +49,10 @@ externalPort = 8000
 [[ports]]
 localPort = 34901
 externalPort = 4200
+
+[[ports]]
+localPort = 39835
+externalPort = 8008
 
 [[ports]]
 localPort = 40901
@@ -73,11 +85,3 @@ externalPort = 6800
 [[ports]]
 localPort = 46443
 externalPort = 3001
-
-[[ports]]
-localPort = 3000
-externalPort = 3000
-
-[[ports]]
-localPort = 8080
-externalPort = 8080

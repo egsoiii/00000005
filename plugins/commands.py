@@ -32,8 +32,12 @@ PASSWORD_ATTEMPTS = {}  # Track password attempt counts: {user_id_owner_id_folde
 PASSWORD_PROMPT_MESSAGES = {}  # Track password prompt message IDs: {user_id: [msg_ids]}
 PASSWORD_RESPONSE_MESSAGES = {}  # Track password response message IDs: {user_id: [msg_ids]}
 
-async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, display_name):
-    """Shared helper to show the folder edit menu with consistent button layout"""
+async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, display_name, force_is_protected=None):
+    """Shared helper to show the folder edit menu with consistent button layout
+    
+    force_is_protected: If provided, use this value instead of checking database.
+                       Useful after password operations to avoid cache issues.
+    """
     from plugins.dbusers import db
     
     # Get or generate token-based share link
@@ -45,7 +49,12 @@ async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, d
     share_link = f"https://t.me/{username}?start=folder_{token}"
     
     folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
-    is_protected = await db.is_folder_password_protected(user_id, folder_name)
+    
+    # Use forced value if provided, otherwise check database
+    if force_is_protected is not None:
+        is_protected = force_is_protected
+    else:
+        is_protected = await db.is_folder_password_protected(user_id, folder_name)
     
     # Build consistent button layout
     raw_buttons = [
@@ -4812,7 +4821,8 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 display_name = await db.get_folder_display_name(folder_name)
                 await db.remove_folder_password(query.from_user.id, folder_name)
-                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name)
+                # Pass force_is_protected=False to ensure button shows "Set Password" immediately
+                await show_folder_edit_menu(client, query.from_user.id, query.message.id, idx, folder_name, display_name, force_is_protected=False)
                 await query.answer("✅ Password deleted successfully!", show_alert=True)
             return
         
