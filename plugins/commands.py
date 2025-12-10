@@ -4690,12 +4690,14 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 username = (await client.get_me()).username
                 share_link = f"https://t.me/{username}?start=folder_{new_token}"
                 
+                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
                 is_protected = await db.is_folder_password_protected(query.from_user.id, folder_name)
                 
-                # Show share menu (like files do) - only share-related options
+                # Go back to edit folder menu (main menu)
                 raw_buttons = [
+                    [{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}],
                     [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                    [{"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
+                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
                 ]
                 
                 # Password buttons - show View and Remove if protected, else show Set
@@ -4707,11 +4709,11 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 else:
                     raw_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}])
                 
-                # Back to edit folder menu
-                raw_buttons.append([{"text": "⋞ Back", "callback_data": f"edit_folder_{idx}"}])
+                raw_buttons.append([{"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}])
+                raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
                 
-                protection_status = "🔒 Password Protected" if is_protected else ""
-                edit_text = f"<b>📤 Share Folder</b>\n\n<b>📁 {display_name}</b>\n{protection_status}\n\nShare this folder with others using the link below:"
+                protection_status = "🔒 Password Protected\n" if is_protected else ""
+                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\nSelect an option:"
                 
                 api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
                 payload = {
@@ -4918,6 +4920,8 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 await db.remove_folder_password(query.from_user.id, folder_name)
                 await query.answer("✅ Password deleted successfully!", show_alert=True)
                 
+                folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                
                 # Get or generate token-based share link (no owner ID in link)
                 token = await db.get_folder_token(query.from_user.id, folder_name)
                 if not token:
@@ -4926,15 +4930,17 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 username = (await client.get_me()).username
                 share_link = f"https://t.me/{username}?start=folder_{token}"
                 
-                # Show share menu (like files do) - only share-related options
+                # Go back to edit folder menu (main menu)
                 raw_buttons = [
+                    [{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}],
                     [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                    [{"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
+                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
                     [{"text": "🔐 Set Password", "callback_data": f"set_folder_password_{idx}"}],
-                    [{"text": "⋞ Back", "callback_data": f"edit_folder_{idx}"}]
+                    [{"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}],
+                    [{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}]
                 ]
                 
-                edit_text = f"<b>📤 Share Folder</b>\n\n<b>📁 {display_name}</b>\n\nShare this folder with others using the link below:"
+                edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n\nSelect an option:"
                 
                 # Try editMessageText first, then editMessageCaption
                 api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
@@ -5572,44 +5578,23 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 
                 if success:
                     await query.answer("✅ Password removed successfully!", show_alert=True)
-                    # Refresh share menu
+                    # Go back to main file menu (like folders do)
                     user = await db.col.find_one({'id': int(query.from_user.id)})
                     stored_files = user.get('stored_files', []) if user else []
                     
                     if 0 <= file_idx < len(stored_files):
                         file_name = stored_files[file_idx].get('file_name', 'File')
-                        username = (await client.get_me()).username
+                        protected = stored_files[file_idx].get('protected', False)
+                        protect_btn = '🛡️✅ Protected' if protected else '🛡️❌ Protect'
                         
-                        file_token = stored_files[file_idx].get('access_token')
-                        if file_token:
-                            string = f'ft_{file_token}'
-                        else:
-                            string = f'file_{file_idx}'
-                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
-                        link = f"https://t.me/{username}?start={encoded}"
-                        
-                        # Use raw API for copy_text feature with token-based link
-                        inline_buttons = [
-                            [{"text": "📋 Copy Link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
-                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}],
-                            [{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}],
-                            [{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}]
+                        buttons = [
+                            [InlineKeyboardButton('🔗 Share', callback_data=f'file_share_{file_idx}'), InlineKeyboardButton('📁 Change Folder', callback_data=f'change_file_folder_{file_idx}')],
+                            [InlineKeyboardButton(protect_btn, callback_data=f'toggle_protected_{file_idx}'), InlineKeyboardButton('❌ Delete', callback_data=f'delete_file_{file_idx}')],
+                            [InlineKeyboardButton('✖️ Close', callback_data=f'close_file_message')]
                         ]
                         
-                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                        payload = {
-                            "chat_id": query.from_user.id,
-                            "message_id": query.message.id,
-                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
-                            "parse_mode": "HTML",
-                            "reply_markup": {"inline_keyboard": inline_buttons}
-                        }
-                        
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(api_url, json=payload) as resp:
-                                result = await resp.json()
-                                if not result.get('ok'):
-                                    logger.error(f"Edit message failed: {result}")
+                        caption = f"<b>✅ File saved!</b>\n\n<b>📄 {file_name}</b>"
+                        await query.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
                 else:
                     await query.answer("Error removing password", show_alert=True)
             except Exception as e:
@@ -5651,52 +5636,23 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 if new_token:
                     await query.answer("✅ Link changed successfully!", show_alert=True)
                     
-                    # Refresh share menu with new link
+                    # Go back to main file menu (like folders do)
                     user = await db.col.find_one({'id': int(query.from_user.id)})
                     stored_files = user.get('stored_files', []) if user else []
                     
                     if 0 <= file_idx < len(stored_files):
                         file_name = stored_files[file_idx].get('file_name', 'File')
-                        username = (await client.get_me()).username
+                        protected = stored_files[file_idx].get('protected', False)
+                        protect_btn = '🛡️✅ Protected' if protected else '🛡️❌ Protect'
                         
-                        string = f'ft_{new_token}'
-                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
-                        link = f"https://t.me/{username}?start={encoded}"
-                        
-                        is_password_protected = stored_files[file_idx].get('password') is not None
-                        
-                        # Use raw API for copy_text feature with token-based link
-                        inline_buttons = [
-                            [{"text": "📋 Copy Link", "copy_text": {"text": link}}, {"text": "📥 Open Link", "url": link}],
-                            [{"text": "♻️ Change Link", "callback_data": f"change_file_link_{file_idx}"}]
+                        buttons = [
+                            [InlineKeyboardButton('🔗 Share', callback_data=f'file_share_{file_idx}'), InlineKeyboardButton('📁 Change Folder', callback_data=f'change_file_folder_{file_idx}')],
+                            [InlineKeyboardButton(protect_btn, callback_data=f'toggle_protected_{file_idx}'), InlineKeyboardButton('❌ Delete', callback_data=f'delete_file_{file_idx}')],
+                            [InlineKeyboardButton('✖️ Close', callback_data=f'close_file_message')]
                         ]
                         
-                        if is_password_protected:
-                            inline_buttons.append([
-                                {"text": "👁️ View Password", "callback_data": f"view_file_password_{file_idx}"},
-                                {"text": "🗑️ Remove Password", "callback_data": f"confirm_remove_file_password_{file_idx}"}
-                            ])
-                        else:
-                            inline_buttons.append([{"text": "🔐 Set Password", "callback_data": f"set_file_password_{file_idx}"}])
-                        
-                        inline_buttons.append([{"text": "⋞ Back", "callback_data": f"share_back_{file_idx}"}])
-                        
-                        protection_status = "🔒 Password Protected\n" if is_password_protected else ""
-                        
-                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                        payload = {
-                            "chat_id": query.from_user.id,
-                            "message_id": query.message.id,
-                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\nShare this file with others using the link below:",
-                            "parse_mode": "HTML",
-                            "reply_markup": {"inline_keyboard": inline_buttons}
-                        }
-                        
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(api_url, json=payload) as resp:
-                                result = await resp.json()
-                                if not result.get('ok'):
-                                    logger.error(f"Edit message failed: {result}")
+                        caption = f"<b>✅ File saved!</b>\n\n<b>📄 {file_name}</b>"
+                        await query.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
                 else:
                     await query.answer("Error changing link", show_alert=True)
             except Exception as e:
