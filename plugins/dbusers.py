@@ -1,8 +1,6 @@
 
 import motor.motor_asyncio
 import time
-import bcrypt
-import copy
 from config import DB_NAME, DB_URI
 
 CACHE_TTL = 300
@@ -573,64 +571,45 @@ class Database:
         self._cache.invalidate(user_id)
     
     async def set_folder_password(self, user_id, folder_name, password):
-        """Set password protection for a folder (password is hashed with bcrypt)"""
-        # Invalidate cache first to ensure fresh read
-        self._cache.invalidate(user_id)
-        
-        # Get fresh data directly from database
-        user = await self.col.find_one({'id': int(user_id)})
+        """Set password protection for a folder (stored in plain text, same as files)"""
+        user = await self._get_user_cached(user_id)
         if not user:
             return False
         
-        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        
-        # Create a deep copy of folders to avoid cache mutation issues
-        folders = copy.deepcopy(user.get('folders', []))
+        folders = user.get('folders', [])
         for folder in folders:
             fname = folder.get('name', str(folder)) if isinstance(folder, dict) else str(folder)
             if fname == folder_name:
                 if isinstance(folder, dict):
-                    folder['password'] = hashed.decode('utf-8')
-                    folder['password_plain'] = password
+                    folder['password'] = password
                 break
         
         await self.col.update_one({'id': int(user_id)}, {'$set': {'folders': folders}})
-        # Invalidate cache again after update to ensure fresh reads
         self._cache.invalidate(user_id)
         return True
     
     async def remove_folder_password(self, user_id, folder_name):
         """Remove password protection from a folder"""
-        # Invalidate cache first to ensure fresh read
-        self._cache.invalidate(user_id)
-        
-        # Get fresh data directly from database
-        user = await self.col.find_one({'id': int(user_id)})
+        user = await self._get_user_cached(user_id)
         if not user:
             return False
         
-        # Create a deep copy of folders to avoid cache mutation issues
-        folders = copy.deepcopy(user.get('folders', []))
-        
+        folders = user.get('folders', [])
         for folder in folders:
             fname = folder.get('name', str(folder)) if isinstance(folder, dict) else str(folder)
             if fname == folder_name:
                 if isinstance(folder, dict):
                     if 'password' in folder:
                         del folder['password']
-                    if 'password_plain' in folder:
-                        del folder['password_plain']
                 break
         
         await self.col.update_one({'id': int(user_id)}, {'$set': {'folders': folders}})
-        # Invalidate cache again after update to ensure fresh reads
         self._cache.invalidate(user_id)
         return True
     
     async def get_folder_password(self, user_id, folder_name):
         """Get password for a folder (returns None if not set)"""
-        # Always read directly from database to avoid stale cache issues
-        user = await self.col.find_one({'id': int(user_id)})
+        user = await self._get_user_cached(user_id)
         if not user:
             return None
         
@@ -643,29 +622,15 @@ class Database:
         return None
     
     async def get_folder_password_plain(self, user_id, folder_name):
-        """Get plain text password for a folder (returns None if not set)"""
-        # Always read directly from database to avoid stale cache issues
-        user = await self.col.find_one({'id': int(user_id)})
-        if not user:
-            return None
-        
-        folders = user.get('folders', [])
-        for folder in folders:
-            fname = folder.get('name', str(folder)) if isinstance(folder, dict) else str(folder)
-            if fname == folder_name:
-                if isinstance(folder, dict):
-                    return folder.get('password_plain')
-        return None
+        """Get plain text password for a folder (same as get_folder_password since stored in plain text)"""
+        return await self.get_folder_password(user_id, folder_name)
     
     async def verify_folder_password(self, user_id, folder_name, password):
-        """Verify password for a folder using bcrypt"""
-        stored_hash = await self.get_folder_password(user_id, folder_name)
-        if stored_hash is None:
+        """Verify password for a folder (plain text comparison, same as files)"""
+        stored_password = await self.get_folder_password(user_id, folder_name)
+        if stored_password is None:
             return True
-        try:
-            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
-        except Exception:
-            return False
+        return password == stored_password
     
     async def is_folder_password_protected(self, user_id, folder_name):
         """Check if a folder has password protection"""
