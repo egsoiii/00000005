@@ -768,6 +768,53 @@ class Database:
         password = await self.get_file_password(user_id, file_idx)
         return password is not None
     
+    # ============ UNIFIED PASSWORD FUNCTIONS ============
+    # These work for both files and folders using item_type parameter
+    
+    async def set_item_password(self, user_id, item_type, identifier, password):
+        """Unified: Set password for file or folder
+        
+        item_type: 'file' or 'folder'
+        identifier: file_idx (int) for files, folder_name (str) for folders
+        """
+        if item_type == 'file':
+            return await self.set_file_password(user_id, identifier, password)
+        elif item_type == 'folder':
+            return await self.set_folder_password(user_id, identifier, password)
+        return False
+    
+    async def get_item_password(self, user_id, item_type, identifier):
+        """Unified: Get password for file or folder"""
+        if item_type == 'file':
+            return await self.get_file_password(user_id, identifier)
+        elif item_type == 'folder':
+            return await self.get_folder_password(user_id, identifier)
+        return None
+    
+    async def remove_item_password(self, user_id, item_type, identifier):
+        """Unified: Remove password from file or folder"""
+        if item_type == 'file':
+            return await self.remove_file_password(user_id, identifier)
+        elif item_type == 'folder':
+            return await self.remove_folder_password(user_id, identifier)
+        return False
+    
+    async def verify_item_password(self, user_id, item_type, identifier, password):
+        """Unified: Verify password for file or folder"""
+        if item_type == 'file':
+            return await self.verify_file_password(user_id, identifier, password)
+        elif item_type == 'folder':
+            return await self.verify_folder_password(user_id, identifier, password)
+        return False
+    
+    async def is_item_password_protected(self, user_id, item_type, identifier):
+        """Unified: Check if file or folder is password protected"""
+        if item_type == 'file':
+            return await self.is_file_password_protected(user_id, identifier)
+        elif item_type == 'folder':
+            return await self.is_folder_password_protected(user_id, identifier)
+        return False
+    
     # ============ FILE TOKEN/LINK MANAGEMENT ============
     
     async def generate_file_token(self, user_id, file_idx):
