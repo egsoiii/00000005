@@ -887,9 +887,32 @@ async def start(client, message):
                 is_protected = file_obj.get('protected', False)
                 file_password = file_obj.get('password')
                 
-                # Check if file is password protected (skip for owner)
+                # Check folder password protection (required for everyone including owner)
+                file_folder = file_obj.get('folder', '')
+                if file_folder:
+                    # Check if file's folder or any parent folder is password protected
+                    path_parts = file_folder.split('/')
+                    for i in range(len(path_parts)):
+                        check_path = '/'.join(path_parts[:i+1])
+                        is_folder_protected = await db.is_folder_password_protected(owner_id, check_path)
+                        folder_access_key = f"{message.from_user.id}_{owner_id}_{check_path}"
+                        
+                        if is_folder_protected and folder_access_key not in VERIFIED_FOLDER_ACCESS:
+                            # Folder requires password
+                            display_name = await db.get_folder_display_name(check_path)
+                            encoded_folder = base64.urlsafe_b64encode(check_path.encode("utf-8")).decode().strip("=")
+                            CAPTION_INPUT_MODE[message.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
+                            await message.reply_text(
+                                f"<b>🔐 This file is in a password protected folder</b>\n\n"
+                                f"📁 Folder: {display_name}\n\n"
+                                f"Please enter the folder password to access this file:\n\n"
+                                f"<i>Send /cancel to cancel</i>",
+                                parse_mode=enums.ParseMode.HTML
+                            )
+                            return
+                
+                # Check individual file password (skip for owner)
                 if file_password and message.from_user.id != owner_id:
-                    # Check if already verified
                     verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
                     if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
                         # Prompt for password
@@ -933,20 +956,45 @@ async def start(client, message):
                             file_obj = f
                             break
                     
-                    # Check if file is password protected (skip for owner)
-                    if file_obj and file_obj.get('password') and message.from_user.id != owner_id:
-                        verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
-                        if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
-                            file_name = file_obj.get('file_name', 'File')
-                            CAPTION_INPUT_MODE[message.from_user.id] = f"verify_file_password_{owner_id}_{file_idx}"
-                            await message.reply_text(
-                                f"<b>🔒 This file is password protected</b>\n\n"
-                                f"<b>📄 {file_name}</b>\n\n"
-                                f"Please enter the password to access this file:\n\n"
-                                f"<i>Send /cancel to cancel</i>",
-                                parse_mode=enums.ParseMode.HTML
-                            )
-                            return
+                    # Check folder password protection (required for everyone including owner)
+                    if file_obj:
+                        file_folder = file_obj.get('folder', '')
+                        if file_folder:
+                            # Check if file's folder or any parent folder is password protected
+                            path_parts = file_folder.split('/')
+                            for i in range(len(path_parts)):
+                                check_path = '/'.join(path_parts[:i+1])
+                                is_folder_protected = await db.is_folder_password_protected(owner_id, check_path)
+                                folder_access_key = f"{message.from_user.id}_{owner_id}_{check_path}"
+                                
+                                if is_folder_protected and folder_access_key not in VERIFIED_FOLDER_ACCESS:
+                                    # Folder requires password
+                                    display_name = await db.get_folder_display_name(check_path)
+                                    encoded_folder = base64.urlsafe_b64encode(check_path.encode("utf-8")).decode().strip("=")
+                                    CAPTION_INPUT_MODE[message.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
+                                    await message.reply_text(
+                                        f"<b>🔐 This file is in a password protected folder</b>\n\n"
+                                        f"📁 Folder: {display_name}\n\n"
+                                        f"Please enter the folder password to access this file:\n\n"
+                                        f"<i>Send /cancel to cancel</i>",
+                                        parse_mode=enums.ParseMode.HTML
+                                    )
+                                    return
+                        
+                        # Check individual file password (skip for owner)
+                        if file_obj.get('password') and message.from_user.id != owner_id:
+                            verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
+                            if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
+                                file_name = file_obj.get('file_name', 'File')
+                                CAPTION_INPUT_MODE[message.from_user.id] = f"verify_file_password_{owner_id}_{file_idx}"
+                                await message.reply_text(
+                                    f"<b>🔒 This file is password protected</b>\n\n"
+                                    f"<b>📄 {file_name}</b>\n\n"
+                                    f"Please enter the password to access this file:\n\n"
+                                    f"<i>Send /cancel to cancel</i>",
+                                    parse_mode=enums.ParseMode.HTML
+                                )
+                                return
                     
                     is_protected = file_obj.get('protected', False) if file_obj else False
                     try:
