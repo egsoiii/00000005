@@ -911,8 +911,8 @@ async def start(client, message):
                             )
                             return
                 
-                # Check individual file password (skip for owner)
-                if file_password and message.from_user.id != owner_id:
+                # Check individual file password (required for everyone via shared link)
+                if file_password:
                     verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
                     if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
                         # Prompt for password
@@ -981,8 +981,8 @@ async def start(client, message):
                                     )
                                     return
                         
-                        # Check individual file password (skip for owner)
-                        if file_obj.get('password') and message.from_user.id != owner_id:
+                        # Check individual file password (required for everyone via shared link)
+                        if file_obj.get('password'):
                             verify_key = f"file_{message.from_user.id}_{owner_id}_{file_idx}"
                             if not VERIFIED_FOLDER_ACCESS.get(verify_key, False):
                                 file_name = file_obj.get('file_name', 'File')
