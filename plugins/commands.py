@@ -10,6 +10,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import ChatAdminRequired, FloodWait
 from pyrogram.types import *
 from pyrogram.raw import functions, types as raw_types
+from plugins.rawapi import send_message_raw, edit_message_text_raw, edit_message_caption_raw, edit_message_reply_markup_raw, edit_message_with_fallback, convert_pyrogram_buttons_to_raw
 from utils import verify_user, check_token, check_verification, get_token, b64_encode, b64_decode
 from config import *
 import re
@@ -69,30 +70,7 @@ async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, d
     protection_status = "🔒 Password Protected" if is_protected else ""
     edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
     
-    # Send using raw API for copy_text support
-    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    payload = {
-        "chat_id": user_id,
-        "message_id": message_id,
-        "text": edit_text,
-        "parse_mode": "HTML",
-        "reply_markup": {"inline_keyboard": raw_buttons}
-    }
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.post(api_url, json=payload) as resp:
-            result = await resp.json()
-            if not result.get("ok"):
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                payload = {
-                    "chat_id": user_id,
-                    "message_id": message_id,
-                    "caption": edit_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": {"inline_keyboard": raw_buttons}
-                }
-                async with session.post(api_url, json=payload) as resp2:
-                    await resp2.json()
+    await edit_message_with_fallback(user_id, message_id, edit_text, reply_markup=raw_buttons)
 
 def build_password_buttons(item_type, identifier, is_protected):
     """Build password-related buttons for files or folders
@@ -746,31 +724,9 @@ async def start(client, message):
             # Convert to raw API format
             encoded_path = b64_encode(folder_name, "utf-8")
             raw_buttons = [[{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📋 Last 5", "callback_data": f"last5_shared_{owner_id}_{encoded_path}"}]]
+            raw_buttons.extend(convert_pyrogram_buttons_to_raw(buttons))
             
-            for row in buttons:
-                raw_row = []
-                for btn in row:
-                    if btn.callback_data:
-                        raw_row.append({"text": btn.text, "callback_data": btn.callback_data})
-                    elif btn.url:
-                        raw_row.append({"text": btn.text, "url": btn.url})
-                if raw_row:
-                    raw_buttons.append(raw_row)
-            
-            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": message.from_user.id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": {"inline_keyboard": raw_buttons}
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(api_url, json=payload) as resp:
-                    result = await resp.json()
-                    if not result.get("ok"):
-                        logger.error(f"Send message error: {result.get('description')}")
+            await send_message_raw(message.from_user.id, text, reply_markup=raw_buttons)
             
             return
         
@@ -909,43 +865,14 @@ async def start(client, message):
                         buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
                     
                     # Convert buttons to raw API format and add copy link buttons
-                    raw_buttons = []
-                    
-                    # Add copy link buttons at the top using raw API with copy_text
                     encoded_path = b64_encode(folder_name, "utf-8")
-                    raw_buttons.append([
+                    raw_buttons = [[
                         {"text": "Copy folder link", "copy_text": {"text": share_link}}, 
                         {"text": "📋 Last 5", "callback_data": f"last5_shared_{owner_id}_{encoded_path}"}
-                    ])
+                    ]]
+                    raw_buttons.extend(convert_pyrogram_buttons_to_raw(buttons))
                     
-                    # Convert Pyrogram buttons to raw API format
-                    for row in buttons:
-                        raw_row = []
-                        for btn in row:
-                            if btn.callback_data:
-                                raw_row.append({"text": btn.text, "callback_data": btn.callback_data})
-                            elif btn.url:
-                                raw_row.append({"text": btn.text, "url": btn.url})
-                        if raw_row:
-                            raw_buttons.append(raw_row)
-                    
-                    # Use raw API to send message with copy link functionality
-                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                    payload = {
-                        "chat_id": message.from_user.id,
-                        "text": text,
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": True,
-                        "reply_markup": {
-                            "inline_keyboard": raw_buttons
-                        }
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(api_url, json=payload) as resp:
-                            result = await resp.json()
-                            if not result.get("ok"):
-                                logger.error(f"Send message error: {result.get('description')}")
+                    await send_message_raw(message.from_user.id, text, reply_markup=raw_buttons)
                     
                     return
                 else:
@@ -2059,42 +1986,13 @@ async def handle_user_input(client, message):
                             buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
                         
                         # Convert buttons to raw API format and add copy link buttons
-                        raw_buttons = []
-                        
-                        # Add copy link buttons at the top using raw API with copy_text
-                        raw_buttons.append([
+                        raw_buttons = [[
                             {"text": "Copy folder link", "copy_text": {"text": share_link}}, 
                             {"text": "📋 Last 5", "callback_data": f"last5_shared_{owner_id}_{encoded_path}"}
-                        ])
+                        ]]
+                        raw_buttons.extend(convert_pyrogram_buttons_to_raw(buttons))
                         
-                        # Convert Pyrogram buttons to raw API format
-                        for row in buttons:
-                            raw_row = []
-                            for btn in row:
-                                if btn.callback_data:
-                                    raw_row.append({"text": btn.text, "callback_data": btn.callback_data})
-                                elif btn.url:
-                                    raw_row.append({"text": btn.text, "url": btn.url})
-                            if raw_row:
-                                raw_buttons.append(raw_row)
-                        
-                        # Use raw API to send message with copy link functionality
-                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                        payload = {
-                            "chat_id": message.from_user.id,
-                            "text": text,
-                            "parse_mode": "HTML",
-                            "disable_web_page_preview": True,
-                            "reply_markup": {
-                                "inline_keyboard": raw_buttons
-                            }
-                        }
-                        
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(api_url, json=payload) as resp:
-                                result = await resp.json()
-                                if not result.get("ok"):
-                                    logger.error(f"Send message error: {result.get('description')}")
+                        await send_message_raw(message.from_user.id, text, reply_markup=raw_buttons)
                     else:
                         # Delete the password input message
                         try:
@@ -3975,44 +3873,14 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
             
             # Convert buttons to raw API format and add copy link buttons
-            raw_buttons = []
-            
-            # Add copy link and get last 5 buttons at the top
             last5_callback = f'last5_shared_{owner_id}_{encoded_path}'
-            raw_buttons.append([
+            raw_buttons = [[
                 {"text": "Copy folder link", "copy_text": {"text": share_link}}, 
                 {"text": "📋 Last 5", "callback_data": last5_callback}
-            ])
+            ]]
+            raw_buttons.extend(convert_pyrogram_buttons_to_raw(buttons))
             
-            # Convert Pyrogram buttons to raw API format
-            for row in buttons:
-                raw_row = []
-                for btn in row:
-                    if btn.callback_data:
-                        raw_row.append({"text": btn.text, "callback_data": btn.callback_data})
-                    elif btn.url:
-                        raw_row.append({"text": btn.text, "url": btn.url})
-                if raw_row:
-                    raw_buttons.append(raw_row)
-            
-            # Use raw API to update message with copy link functionality
-            api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-            payload = {
-                "chat_id": query.from_user.id,
-                "message_id": query.message.id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": {
-                    "inline_keyboard": raw_buttons
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(api_url, json=payload) as resp:
-                    result = await resp.json()
-                    if not result.get("ok"):
-                        logger.error(f"Edit message error: {result.get('description')}")
+            await edit_message_text_raw(query.from_user.id, query.message.id, text, reply_markup=raw_buttons)
             
             await query.answer()
             return
@@ -4352,44 +4220,14 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     share_link = f"https://t.me/{username}?start={encoded_link}"
                     
                     # Convert buttons to raw API format and add copy link buttons
-                    raw_buttons = []
-                    
-                    # Add copy link and last 5 buttons at the top
                     last5_callback = f'last5_shared_{owner_id}_{encoded_path_btn}'
-                    raw_buttons.append([
+                    raw_buttons = [[
                         {"text": "Copy folder link", "copy_text": {"text": share_link}}, 
                         {"text": "📋 Last 5", "callback_data": last5_callback}
-                    ])
+                    ]]
+                    raw_buttons.extend(convert_pyrogram_buttons_to_raw(buttons))
                     
-                    # Convert Pyrogram buttons to raw API format
-                    for row in buttons:
-                        raw_row = []
-                        for btn in row:
-                            if btn.callback_data:
-                                raw_row.append({"text": btn.text, "callback_data": btn.callback_data})
-                            elif btn.url:
-                                raw_row.append({"text": btn.text, "url": btn.url})
-                        if raw_row:
-                            raw_buttons.append(raw_row)
-                    
-                    # Use raw API to update message with copy link functionality
-                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                    payload = {
-                        "chat_id": query.from_user.id,
-                        "message_id": query.message.id,
-                        "text": text,
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": True,
-                        "reply_markup": {
-                            "inline_keyboard": raw_buttons
-                        }
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(api_url, json=payload) as resp:
-                            result = await resp.json()
-                            if not result.get("ok"):
-                                logger.error(f"Edit message error: {result.get('description')}")
+                    await edit_message_text_raw(query.from_user.id, query.message.id, text, reply_markup=raw_buttons)
                     
                     await query.answer()
             except Exception as e:
@@ -4725,26 +4563,14 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 username = (await client.get_me()).username
                 share_link = f"https://t.me/{username}?start=folder_{token}"
                 
-                reply_markup = {
-                    "inline_keyboard": [
-                        [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
-                        [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
-                        [{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"edit_folder_{idx}"}]
-                    ]
-                }
+                raw_buttons = [
+                    [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📥 Open Link", "url": share_link}],
+                    [{"text": "🔄 Change Link", "callback_data": f"change_folder_link_{idx}"}],
+                    [{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"edit_folder_{idx}"}]
+                ]
                 
-                # Just update the buttons
                 try:
-                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
-                    payload = {
-                        "chat_id": query.from_user.id,
-                        "message_id": query.message.id,
-                        "reply_markup": reply_markup
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(api_url, json=payload) as resp:
-                            await resp.json()
+                    await edit_message_reply_markup_raw(query.from_user.id, query.message.id, raw_buttons)
                 except Exception as e:
                     logger.error(f"Share folder error: {e}")
                 
@@ -4898,16 +4724,11 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         inline_buttons.extend(build_password_buttons('file', idx, False))
                         inline_buttons.append([{"text": "⋞ Back", "callback_data": f"share_back_{idx}"}])
                         
-                        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                        payload = {
-                            "chat_id": query.from_user.id,
-                            "message_id": query.message.id,
-                            "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
-                            "parse_mode": "HTML",
-                            "reply_markup": {"inline_keyboard": inline_buttons}
-                        }
-                        async with aiohttp.ClientSession() as session:
-                            await session.post(api_url, json=payload)
+                        await edit_message_text_raw(
+                            query.from_user.id, query.message.id,
+                            f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n\nShare this file with others using the link below:",
+                            reply_markup=inline_buttons
+                        )
                 else:
                     await query.answer("Error removing password", show_alert=True)
             elif item_type == 'folder':
@@ -5259,35 +5080,11 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     
                     protection_status = "🔒 Password Protected" if is_password_protected else ""
                     
-                    # Use raw API to support copy_text feature
-                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                    payload = {
-                        "chat_id": query.from_user.id,
-                        "message_id": query.message.id,
-                        "text": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:",
-                        "parse_mode": "HTML",
-                        "reply_markup": {"inline_keyboard": inline_buttons}
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(api_url, json=payload) as resp:
-                            result = await resp.json()
-                            if not result.get("ok"):
-                                # Try editMessageCaption for media messages
-                                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
-                                payload = {
-                                    "chat_id": query.from_user.id,
-                                    "message_id": query.message.id,
-                                    "caption": f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:",
-                                    "parse_mode": "HTML",
-                                    "reply_markup": {"inline_keyboard": inline_buttons}
-                                }
-                                async with session.post(api_url, json=payload) as resp2:
-                                    result2 = await resp2.json()
-                                    if not result2.get("ok"):
-                                        logger.error(f"Share menu error: {result2.get('description')}")
-                                        await query.answer("Error updating share section", show_alert=True)
-                                        return
+                    share_text = f"<b>📤 Share File</b>\n\n<b>📄 {file_name}</b>\n{protection_status}\n\nShare this file with others using the link below:"
+                    result = await edit_message_with_fallback(query.from_user.id, query.message.id, share_text, reply_markup=inline_buttons)
+                    if not result.get("ok"):
+                        await query.answer("Error updating share section", show_alert=True)
+                        return
                     
                     await query.answer()
             except Exception as e:
