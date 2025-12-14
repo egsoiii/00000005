@@ -5180,8 +5180,10 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             user = await db.col.find_one({'id': int(query.from_user.id)})
             stored_files = user.get('stored_files', []) if user else []
             current_folder = None
+            file_caption = None
             if 0 <= file_idx < len(stored_files):
                 current_folder = stored_files[file_idx].get('folder', None)
+                file_caption = stored_files[file_idx].get('caption', None)
             
             folders = await db.get_folders(query.from_user.id)
             if 0 <= folder_idx < len(folders):
@@ -5196,6 +5198,29 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 # Update file folder
                 await db.update_file_folder(query.from_user.id, file_idx, folder_name)
                 await query.answer(f"✅ Moved to folder: {folder_name}", show_alert=True)
+                
+                # Go back to file view with original caption
+                user = await db.col.find_one({'id': int(query.from_user.id)})
+                stored_files = user.get('stored_files', []) if user else []
+                
+                if 0 <= file_idx < len(stored_files):
+                    file_name = stored_files[file_idx].get('file_name', 'File')
+                    file_caption = stored_files[file_idx].get('caption', None)
+                    protected = stored_files[file_idx].get('protected', False)
+                    protect_btn = '🛡️✅ Protected' if protected else '🛡️❌ Protect'
+                    
+                    buttons = [
+                        [InlineKeyboardButton('🔗 Share', callback_data=f'file_share_{file_idx}'), InlineKeyboardButton('📁 Change Folder', callback_data=f'change_file_folder_{file_idx}')],
+                        [InlineKeyboardButton(protect_btn, callback_data=f'toggle_protected_{file_idx}'), InlineKeyboardButton('❌ Delete', callback_data=f'delete_file_{file_idx}')],
+                        [InlineKeyboardButton('✖️ Close', callback_data=f'close_file_message')]
+                    ]
+                    
+                    # Use original file caption if available, otherwise use file name
+                    if file_caption:
+                        caption = file_caption
+                    else:
+                        caption = f"<b>📄 {file_name}</b>"
+                    await query.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
             return
         
         elif query.data.startswith("file_share_"):
