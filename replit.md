@@ -57,6 +57,7 @@ python bot.py
 │   └── utils/          # Utility functions
 └── plugins/
     ├── commands.py     # Main command handlers
+    ├── Folder.py       # Folder management (UI builders, helpers, commands)
     ├── password.py     # Unified password module for files/folders
     ├── rawapi.py       # Raw Telegram Bot API helpers
     ├── dbusers.py      # Database operations
