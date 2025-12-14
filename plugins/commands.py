@@ -36,6 +36,25 @@ from plugins.password import (
 )
 from utils import verify_user, check_token, check_verification, get_token, b64_encode, b64_decode
 from config import *
+from plugins.Folder import (
+    get_folder_name_from_idx,
+    get_folder_share_link,
+    show_folder_edit_menu,
+    build_folder_buttons,
+    build_browse_folder_ui,
+    build_shared_folder_ui,
+    send_folder_files,
+    validate_folder_name,
+    create_folder_for_user,
+    create_subfolder_for_user,
+    delete_folder_for_user,
+    rename_folder_for_user,
+    build_manage_folders_ui,
+    build_root_folders_ui,
+    build_change_file_folder_ui,
+    BATCH_STOP_FLAGS as FOLDER_BATCH_STOP_FLAGS,
+    FOLDER_PROMPT_MSG as FOLDER_PROMPT_MSG_SHARED,
+)
 import re
 import json
 from urllib.parse import quote_plus
@@ -45,50 +64,10 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 BATCH_FILES = {}
-BATCH_STOP_FLAGS = {}  # Track which batches should stop: {user_id: True/False}
-FOLDER_PROMPT_MSG = {}  # Track folder creation prompt message IDs: {user_id: message_id}
+BATCH_STOP_FLAGS = FOLDER_BATCH_STOP_FLAGS  # Use shared batch stop flags from Folder module
+FOLDER_PROMPT_MSG = FOLDER_PROMPT_MSG_SHARED  # Use shared folder prompt messages from Folder module
 REPORT_BUG_MODE = {}  # Track users in report bug mode: {user_id: message_id}
 RESTORE_MODE = {}  # Track users entering restore token: {user_id: True}
-
-async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, display_name, force_is_protected=None):
-    """Shared helper to show the folder edit menu with consistent button layout
-    
-    force_is_protected: If provided, use this value instead of checking database.
-                       Useful after password operations to avoid cache issues.
-    """
-    from plugins.dbusers import db
-    
-    # Get or generate token-based share link
-    token = await db.get_folder_token(user_id, folder_name)
-    if not token:
-        token = await db.generate_folder_token(user_id, folder_name)
-    
-    username = (await client.get_me()).username
-    share_link = f"https://t.me/{username}?start=folder_{token}"
-    
-    folder_encoded = b64_encode(folder_name, "utf-8")
-    
-    # Use forced value if provided, otherwise check database
-    if force_is_protected is not None:
-        is_protected = force_is_protected
-    else:
-        is_protected = await db.is_folder_password_protected(user_id, folder_name)
-    
-    # Build consistent button layout
-    raw_buttons = [
-        [{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "♻️ Change Link", "callback_data": f"change_folder_link_{idx}"}],
-    ]
-    
-    # Use unified password buttons
-    raw_buttons.extend(build_password_buttons('folder', idx, is_protected))
-    
-    raw_buttons.append([{"text": "✏️ Rename", "callback_data": f"rename_folder_action_{idx}"}, {"text": "🗑️ Delete", "callback_data": f"delete_folder_action_{idx}"}])
-    raw_buttons.append([{"text": "⋞ ʙᴀᴄᴋ", "callback_data": f"browse_folder_{folder_encoded}"}])
-    
-    protection_status = "🔒 Password Protected" if is_protected else ""
-    edit_text = f"<b>✏️ Edit Folder: {display_name}</b>\n{protection_status}\n\nSelect an option:"
-    
-    await edit_message_with_fallback(user_id, message_id, edit_text, reply_markup=raw_buttons)
 
 def get_size(size):
     """Get size in readable format"""
@@ -392,92 +371,6 @@ async def show_filters_cmd(client, message):
     for i, f in enumerate(filters_list, 1):
         text += f"{i}. {f}\n"
     await message.reply_text(text)
-
-@Client.on_message(filters.command("createfolder") & filters.private)
-async def create_folder_cmd(client, message):
-    """Create a new folder"""
-    if len(message.command) < 2:
-        await message.reply_text("<b>📁 Create Folder\n\nUsage: /createfolder [folder_name]</b>")
-        return
-    
-    folder_name = " ".join(message.command[1:])
-    
-    # Prevent creating nested folders (no "/" allowed in folder name)
-    if '/' in folder_name:
-        await message.reply_text("<b>❌ Folder name cannot contain '/'. Only single-level folders are allowed here. Use the subfolder button inside a folder to create subfolders.</b>")
-        return
-    
-    folders = await db.get_folders(message.from_user.id)
-    
-    # Check if folder already exists (handle both dict and string formats)
-    for f in folders:
-        fname = f.get('name', str(f)) if isinstance(f, dict) else str(f)
-        if fname == folder_name:
-            await message.reply_text(f"<b>❌ Folder '{folder_name}' already exists</b>")
-            return
-    
-    await db.create_folder(message.from_user.id, folder_name)
-    await message.reply_text(f"<b>✅ Folder created: {folder_name}</b>")
-
-@Client.on_message(filters.command("listfolders") & filters.private)
-async def list_folders_cmd(client, message):
-    """List all folders"""
-    folders = await db.get_folders(message.from_user.id)
-    selected = await db.get_selected_folder(message.from_user.id)
-    
-    if not folders:
-        await message.reply_text("<b>📭 No folders created yet</b>")
-        return
-    
-    text = "<b>📁 Your Folders:\n\n</b>"
-    for i, f in enumerate(folders, 1):
-        marker = "✓" if f['name'] == selected else " "
-        text += f"{i}. [{marker}] {f['name']}\n"
-    await message.reply_text(text)
-
-@Client.on_message(filters.command("deletefolder") & filters.private)
-async def delete_folder_cmd(client, message):
-    """Delete a folder"""
-    if len(message.command) < 2:
-        await message.reply_text("<b>📁 Delete Folder\n\nUsage: /deletefolder [folder_name]</b>")
-        return
-    
-    folder_name = " ".join(message.command[1:])
-    folders = await db.get_folders(message.from_user.id)
-    
-    # Check if folder exists (handle both dict and string formats)
-    found = False
-    for f in folders:
-        fname = f.get('name', str(f)) if isinstance(f, dict) else str(f)
-        if fname == folder_name:
-            found = True
-            break
-    
-    if not found:
-        await message.reply_text(f"<b>❌ Folder '{folder_name}' not found</b>")
-        return
-    
-    await db.delete_folder(message.from_user.id, folder_name)
-    selected = await db.get_selected_folder(message.from_user.id)
-    if selected == folder_name:
-        await db.set_selected_folder(message.from_user.id, None)
-    
-    await message.reply_text(f"<b>✅ Folder deleted: {folder_name}</b>")
-
-@Client.on_message(filters.command("renamefolder") & filters.private)
-async def rename_folder_cmd(client, message):
-    """Rename a folder"""
-    if len(message.command) < 3:
-        await message.reply_text("<b>📁 Rename Folder\n\nUsage: /renamefolder [old_name] [new_name]</b>")
-        return
-    
-    old_name = message.command[1]
-    new_name = " ".join(message.command[2:])
-    
-    if await db.rename_folder(message.from_user.id, old_name, new_name):
-        await message.reply_text(f"<b>✅ Renamed: {old_name} → {new_name}</b>")
-    else:
-        await message.reply_text(f"<b>❌ Folder '{old_name}' not found</b>")
 
 @Client.on_message(filters.command("settings") & filters.private)
 async def settings_cmd(client, message):
