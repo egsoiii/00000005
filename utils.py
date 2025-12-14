@@ -1,8 +1,19 @@
 
-import logging, asyncio, os, re, random, pytz, aiohttp, requests, string, json, http.client
+import logging, asyncio, os, re, random, pytz, aiohttp, requests, string, json, http.client, base64
 from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
+
+
+def b64_encode(data: str, encoding: str = "ascii") -> str:
+    """Encode a string to URL-safe base64 without padding."""
+    return base64.urlsafe_b64encode(data.encode(encoding)).decode().strip("=")
+
+
+def b64_decode(data: str, encoding: str = "ascii") -> str:
+    """Decode a URL-safe base64 string (handles missing padding)."""
+    padded = data + "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(padded).decode(encoding)
 logger.setLevel(logging.INFO)
 TOKENS = {}
 VERIFIED = {}

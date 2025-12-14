@@ -10,11 +10,10 @@ from pyrogram import Client, filters, enums
 from pyrogram.errors import ChatAdminRequired, FloodWait
 from pyrogram.types import *
 from pyrogram.raw import functions, types as raw_types
-from utils import verify_user, check_token, check_verification, get_token
+from utils import verify_user, check_token, check_verification, get_token, b64_encode, b64_decode
 from config import *
 import re
 import json
-import base64
 from urllib.parse import quote_plus
 from core.utils.file_properties import get_name, get_hash, get_media_file_size
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChatIdInvalid
@@ -48,7 +47,7 @@ async def show_folder_edit_menu(client, user_id, message_id, idx, folder_name, d
     username = (await client.get_me()).username
     share_link = f"https://t.me/{username}?start=folder_{token}"
     
-    folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+    folder_encoded = b64_encode(folder_name, "utf-8")
     
     # Use forced value if provided, otherwise check database
     if force_is_protected is not None:
@@ -595,7 +594,7 @@ async def start(client, message):
         encoded_token = data[8:]  # Remove "restore_" prefix
         try:
             # Decode the base64 encoded token
-            restore_token = base64.urlsafe_b64decode(encoded_token + "=" * (-len(encoded_token) % 4)).decode("utf-8")
+            restore_token = b64_decode(encoded_token, "utf-8")
             
             # Parse token to extract user_id
             token_user_id, random_part = await db.parse_backup_token(restore_token)
@@ -660,7 +659,7 @@ async def start(client, message):
             if is_protected and access_key not in VERIFIED_FOLDER_ACCESS:
                 # Ask for password
                 display_name = await db.get_folder_display_name(folder_name)
-                encoded_folder = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                encoded_folder = b64_encode(folder_name, "utf-8")
                 CAPTION_INPUT_MODE[message.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
                 prompt_msg = await message.reply_text(f"<b>🔐 This folder is password protected</b>\n\n📁 Folder: {display_name}\n\nPlease enter the password to access this folder:", parse_mode=enums.ParseMode.HTML)
                 if message.from_user.id not in PASSWORD_PROMPT_MESSAGES:
@@ -687,7 +686,7 @@ async def start(client, message):
             share_link = f"https://t.me/{username}?start=folder_{token}"
             
             # Get All Files button
-            encoded_path = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+            encoded_path = b64_encode(folder_name, "utf-8")
             buttons.append([InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_shared_{owner_id}_{encoded_path}')])
             
             # Get subfolders
@@ -696,7 +695,7 @@ async def start(client, message):
             for f in subfolders:
                 sub_folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 sub_display = await db.get_folder_display_name(sub_folder_name)
-                sub_encoded = base64.urlsafe_b64encode(sub_folder_name.encode("utf-8")).decode().strip("=")
+                sub_encoded = b64_encode(sub_folder_name, "utf-8")
                 sub_access_key = f"{message.from_user.id}_{owner_id}_{sub_folder_name}"
                 is_sub_protected = await db.is_folder_password_protected(owner_id, sub_folder_name)
                 
@@ -729,7 +728,7 @@ async def start(client, message):
                     file_id = file_obj.get('file_id')
                     if file_id:
                         file_link_data = f"sharedfile_{owner_id}_{file_id}"
-                        encoded_file_link = base64.urlsafe_b64encode(file_link_data.encode("ascii")).decode().strip("=")
+                        encoded_file_link = b64_encode(file_link_data)
                         link = f"https://t.me/{username}?start={encoded_file_link}"
                         text += f"• <a href='{link}'>{file_name}</a>\n"
                     else:
@@ -741,11 +740,11 @@ async def start(client, message):
             # Back button
             if '/' in folder_name:
                 parent_path = '/'.join(folder_name.split('/')[:-1])
-                parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                parent_encoded = b64_encode(parent_path, "utf-8")
                 buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
             
             # Convert to raw API format
-            encoded_path = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+            encoded_path = b64_encode(folder_name, "utf-8")
             raw_buttons = [[{"text": "Copy folder link", "copy_text": {"text": share_link}}, {"text": "📋 Last 5", "callback_data": f"last5_shared_{owner_id}_{encoded_path}"}]]
             
             for row in buttons:
@@ -779,7 +778,7 @@ async def start(client, message):
         if data.startswith("BATCH-"):
             # Remove BATCH- prefix and decode
             batch_data = data[6:]  # Remove "BATCH-" prefix
-            decoded = base64.urlsafe_b64decode(batch_data + "=" * (-len(batch_data) % 4)).decode("ascii")
+            decoded = b64_decode(batch_data)
             is_batch = True
             # For batch: decoded is "file_XXXX" where XXXX is the message ID of the batch JSON document
             if decoded.startswith("file_"):
@@ -788,7 +787,7 @@ async def start(client, message):
             else:
                 return await message.reply_text("<b>❌ Invalid batch link format!</b>")
         else:
-            decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("ascii")
+            decoded = b64_decode(data)
             
             if decoded.startswith("folder_"):
                 # Folder share link format: folder_{owner_user_id}_{encoded_folder_name}
@@ -796,7 +795,7 @@ async def start(client, message):
                 if len(parts) >= 3:
                     owner_id = int(parts[1])
                     encoded_folder = parts[2]
-                    folder_name = base64.urlsafe_b64decode(encoded_folder + "=" * (-len(encoded_folder) % 4)).decode("utf-8")
+                    folder_name = b64_decode(encoded_folder, "utf-8")
                     
                     # Check if folder is password protected
                     is_protected = await db.is_folder_password_protected(owner_id, folder_name)
@@ -833,12 +832,12 @@ async def start(client, message):
                     # Generate share link for Copy folder link button
                     username = (await client.get_me()).username
                     link_data = f"folder_{owner_id}_{encoded_folder}"
-                    encoded_link = base64.urlsafe_b64encode(link_data.encode("ascii")).decode().strip("=")
+                    encoded_link = b64_encode(link_data)
                     share_link = f"https://t.me/{username}?start={encoded_link}"
                     
                     # 1. Get All Files button
                     action_row = []
-                    encoded_path = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                    encoded_path = b64_encode(folder_name, "utf-8")
                     action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_shared_{owner_id}_{encoded_path}'))
                     buttons.append(action_row)
                     
@@ -850,7 +849,7 @@ async def start(client, message):
                     for f in subfolders:
                         sub_folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                         sub_display = await db.get_folder_display_name(sub_folder_name)
-                        sub_encoded = base64.urlsafe_b64encode(sub_folder_name.encode("utf-8")).decode().strip("=")
+                        sub_encoded = b64_encode(sub_folder_name, "utf-8")
                         
                         # Check if subfolder has its own password
                         sub_access_key = f"{message.from_user.id}_{owner_id}_{sub_folder_name}"
@@ -891,7 +890,7 @@ async def start(client, message):
                             if file_id:
                                 # Create shared file link
                                 file_link_data = f"sharedfile_{owner_id}_{file_id}"
-                                encoded_file_link = base64.urlsafe_b64encode(file_link_data.encode("ascii")).decode().strip("=")
+                                encoded_file_link = b64_encode(file_link_data)
                                 link = f"https://t.me/{username}?start={encoded_file_link}"
                                 text += f"• <a href='{link}'>{file_name}</a>\n"
                             else:
@@ -906,14 +905,14 @@ async def start(client, message):
                     # Back button - go to parent folder if exists
                     if '/' in folder_name:
                         parent_path = '/'.join(folder_name.split('/')[:-1])
-                        parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                        parent_encoded = b64_encode(parent_path, "utf-8")
                         buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
                     
                     # Convert buttons to raw API format and add copy link buttons
                     raw_buttons = []
                     
                     # Add copy link buttons at the top using raw API with copy_text
-                    encoded_path = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                    encoded_path = b64_encode(folder_name, "utf-8")
                     raw_buttons.append([
                         {"text": "Copy folder link", "copy_text": {"text": share_link}}, 
                         {"text": "📋 Last 5", "callback_data": f"last5_shared_{owner_id}_{encoded_path}"}
@@ -980,7 +979,7 @@ async def start(client, message):
                         if is_folder_protected and folder_access_key not in VERIFIED_FOLDER_ACCESS:
                             # Folder requires password
                             display_name = await db.get_folder_display_name(check_path)
-                            encoded_folder = base64.urlsafe_b64encode(check_path.encode("utf-8")).decode().strip("=")
+                            encoded_folder = b64_encode(check_path, "utf-8")
                             CAPTION_INPUT_MODE[message.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
                             await message.reply_text(
                                 f"<b>🔐 This file is in a password protected folder</b>\n\n"
@@ -1050,7 +1049,7 @@ async def start(client, message):
                                 if is_folder_protected and folder_access_key not in VERIFIED_FOLDER_ACCESS:
                                     # Folder requires password
                                     display_name = await db.get_folder_display_name(check_path)
-                                    encoded_folder = base64.urlsafe_b64encode(check_path.encode("utf-8")).decode().strip("=")
+                                    encoded_folder = b64_encode(check_path, "utf-8")
                                     CAPTION_INPUT_MODE[message.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
                                     await message.reply_text(
                                         f"<b>🔐 This file is in a password protected folder</b>\n\n"
@@ -1928,7 +1927,7 @@ async def handle_user_input(client, message):
                     encoded_folder = parts[1]
                     
                     password = message.text.strip()
-                    folder_name = base64.urlsafe_b64decode(encoded_folder + "=" * (-len(encoded_folder) % 4)).decode("utf-8")
+                    folder_name = b64_decode(encoded_folder, "utf-8")
                     
                     # Track password attempts (max 2)
                     attempt_key = f"{message.from_user.id}_{owner_id}_{folder_name}"
@@ -1987,12 +1986,12 @@ async def handle_user_input(client, message):
                         # Generate share link for Copy folder link button
                         username = (await client.get_me()).username
                         link_data = f"folder_{owner_id}_{encoded_folder}"
-                        encoded_link = base64.urlsafe_b64encode(link_data.encode("ascii")).decode().strip("=")
+                        encoded_link = b64_encode(link_data)
                         share_link = f"https://t.me/{username}?start={encoded_link}"
                         
                         # 1. Get All Files button
                         action_row = []
-                        encoded_path = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                        encoded_path = b64_encode(folder_name, "utf-8")
                         action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_shared_{owner_id}_{encoded_path}'))
                         buttons.append(action_row)
                         
@@ -2004,7 +2003,7 @@ async def handle_user_input(client, message):
                         for f in subfolders:
                             sub_folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                             sub_display = await db.get_folder_display_name(sub_folder_name)
-                            sub_encoded = base64.urlsafe_b64encode(sub_folder_name.encode("utf-8")).decode().strip("=")
+                            sub_encoded = b64_encode(sub_folder_name, "utf-8")
                             
                             # Check if subfolder has its own password
                             sub_access_key = f"{message.from_user.id}_{owner_id}_{sub_folder_name}"
@@ -2041,7 +2040,7 @@ async def handle_user_input(client, message):
                                 if file_id:
                                     # Create shared file link
                                     file_link_data = f"sharedfile_{owner_id}_{file_id}"
-                                    encoded_file_link = base64.urlsafe_b64encode(file_link_data.encode("ascii")).decode().strip("=")
+                                    encoded_file_link = b64_encode(file_link_data)
                                     link = f"https://t.me/{username}?start={encoded_file_link}"
                                     text += f"• <a href='{link}'>{file_name}</a>\n"
                                 else:
@@ -2056,7 +2055,7 @@ async def handle_user_input(client, message):
                         # Back button - go to parent folder if exists
                         if '/' in folder_name:
                             parent_path = '/'.join(folder_name.split('/')[:-1])
-                            parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                            parent_encoded = b64_encode(parent_path, "utf-8")
                             buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
                         
                         # Convert buttons to raw API format and add copy link buttons
@@ -3372,7 +3371,7 @@ Send /cancel to cancel.</b>"""
         elif query.data == "get_restore_link":
             token = await db.generate_backup_token(query.from_user.id)
             username = (await client.get_me()).username
-            encoded_token = base64.urlsafe_b64encode(token.encode()).decode().strip("=")
+            encoded_token = b64_encode(token)
             restore_link = f"https://t.me/{username}?start=restore_{encoded_token}"
             text = f"""<b>🔗 Your Restore Link
 
@@ -3451,7 +3450,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     file_name = file_obj.get('file_name', 'Unknown')
                     folder = file_obj.get('folder') or 'Unorganized'
                     string = f'file_{actual_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     text += f"{actual_idx + 1}. <a href='{link}'>{file_name}</a> <b>[{folder}]</b>\n\n"
             
@@ -3481,14 +3480,14 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     try:
                         page = int(parts[1])
                         encoded_path = parts[2]
-                        current_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                        current_path = b64_decode(encoded_path, "utf-8")
                     except:
                         current_path = None
             elif query.data.startswith("browse_folder_"):
                 # Decode the folder path from base64
                 encoded_path = query.data[14:]
                 try:
-                    current_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                    current_path = b64_decode(encoded_path, "utf-8")
                 except:
                     current_path = None
             
@@ -3516,7 +3515,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 
                 # 1. Get All Files, Last 5 Files, and Edit buttons on TOP
                 action_row = []
-                encoded = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+                encoded = b64_encode(current_path, "utf-8")
                 if total_files_recursive:
                     action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_folder_{encoded}'))
                 if total_files_recursive:
@@ -3540,7 +3539,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     sub_display = await db.get_folder_display_name(folder_name)
                     files_in_f = await db.get_files_in_folder_recursive(query.from_user.id, folder_name)
                     # Encode folder path for callback
-                    encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                    encoded = b64_encode(folder_name, "utf-8")
                     row.append(InlineKeyboardButton(f'📁 {sub_display} ({len(files_in_f)})', callback_data=f'browse_folder_{encoded}'))
                     if len(row) == 2:
                         buttons.append(row)
@@ -3572,7 +3571,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         file_idx = next((i for i, f in enumerate(all_files) if f.get('file_id') == file_obj.get('file_id')), None)
                         if file_idx is not None:
                             string = f'file_{file_idx}'
-                            encoded_file = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                            encoded_file = b64_encode(string)
                             link = f"https://t.me/{username}?start={encoded_file}"
                             text += f"• <a href='{link}'>{file_name}</a>\n"
                         else:
@@ -3580,7 +3579,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     
                     # Add pagination buttons if needed
                     if total_pages > 1:
-                        encoded_path = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+                        encoded_path = b64_encode(current_path, "utf-8")
                         nav_row = []
                         if page > 0:
                             nav_row.append(InlineKeyboardButton('⬅️ Prev', callback_data=f'folderp:{page - 1}:{encoded_path}'))
@@ -3591,13 +3590,13 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 
                 # 4. Add subfolder creation button ONLY for root folders (no "/" in path) - at the end
                 if '/' not in current_path:
-                    encoded = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+                    encoded = b64_encode(current_path, "utf-8")
                     buttons.append([InlineKeyboardButton('➕ Add Subfolder', callback_data=f'add_subfolder_{encoded}')])
                 
                 # Back button - go to parent folder or root
                 if '/' in current_path:
                     parent_path = '/'.join(current_path.split('/')[:-1])
-                    parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                    parent_encoded = b64_encode(parent_path, "utf-8")
                     buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'browse_folder_{parent_encoded}')])
                 else:
                     buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data='files_by_folder')])
@@ -3613,7 +3612,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     if not folder_name or folder_name.lower() == 'default' or folder_name == 'None':
                         continue
                     files_in_f = await db.get_files_in_folder_recursive(query.from_user.id, folder_name)
-                    encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                    encoded = b64_encode(folder_name, "utf-8")
                     row.append(InlineKeyboardButton(f'📁 {folder_name} ({len(files_in_f)})', callback_data=f'browse_folder_{encoded}'))
                     if len(row) == 2:
                         buttons.append(row)
@@ -3668,7 +3667,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             # Get All Files from folder with flood wait handling
             encoded_path = query.data[14:]
             try:
-                folder_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                folder_path = b64_decode(encoded_path, "utf-8")
             except:
                 await query.answer("Error decoding folder path", show_alert=True)
                 return
@@ -3753,7 +3752,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             # Get last 5 files from folder
             encoded_path = query.data[13:]
             try:
-                folder_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                folder_path = b64_decode(encoded_path, "utf-8")
             except:
                 await query.answer("Error decoding folder path", show_alert=True)
                 return
@@ -3840,7 +3839,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         page = int(parts[1])
                         owner_id = int(parts[2])
                         encoded_path = parts[3]
-                        current_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                        current_path = b64_decode(encoded_path, "utf-8")
                     except:
                         await query.answer("Error decoding folder path", show_alert=True)
                         return
@@ -3852,7 +3851,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     try:
                         owner_id = int(parts[0])
                         encoded_path = parts[1]
-                        current_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                        current_path = b64_decode(encoded_path, "utf-8")
                     except:
                         await query.answer("Error decoding folder path", show_alert=True)
                         return
@@ -3867,7 +3866,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             
             if is_current_protected and current_access_key not in VERIFIED_FOLDER_ACCESS:
                 # This specific folder has its own password - require verification
-                encoded_current = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+                encoded_current = b64_encode(current_path, "utf-8")
                 display_name = await db.get_folder_display_name(current_path)
                 CAPTION_INPUT_MODE[query.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_current}"
                 await query.message.reply_text(f"<b>🔐 This folder is password protected</b>\n\n📁 Folder: {display_name}\n\nPlease enter the password to access this folder:", parse_mode=enums.ParseMode.HTML)
@@ -3884,7 +3883,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     
                     if is_parent_protected and parent_access_key not in VERIFIED_FOLDER_ACCESS:
                         # Parent folder requires password
-                        encoded_parent = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                        encoded_parent = b64_encode(parent_path, "utf-8")
                         display_name = await db.get_folder_display_name(parent_path)
                         CAPTION_INPUT_MODE[query.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_parent}"
                         await query.message.reply_text(f"<b>🔐 Parent folder is password protected</b>\n\n📁 Folder: {display_name}\n\nPlease enter the password to access this folder:", parse_mode=enums.ParseMode.HTML)
@@ -3903,9 +3902,9 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             
             # Generate share link for Copy folder link button
             username = (await client.get_me()).username
-            encoded_path = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+            encoded_path = b64_encode(current_path, "utf-8")
             link_data = f"folder_{owner_id}_{encoded_path}"
-            encoded_link = base64.urlsafe_b64encode(link_data.encode("ascii")).decode().strip("=")
+            encoded_link = b64_encode(link_data)
             share_link = f"https://t.me/{username}?start={encoded_link}"
             
             # 1. Get All Files button
@@ -3921,7 +3920,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             for f in subfolders:
                 sub_folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                 sub_display = await db.get_folder_display_name(sub_folder_name)
-                sub_encoded = base64.urlsafe_b64encode(sub_folder_name.encode("utf-8")).decode().strip("=")
+                sub_encoded = b64_encode(sub_folder_name, "utf-8")
                 
                 # Check if subfolder has its own password
                 sub_access_key = f"{query.from_user.id}_{owner_id}_{sub_folder_name}"
@@ -3957,7 +3956,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     file_id = file_obj.get('file_id')
                     if file_id:
                         file_link_data = f"sharedfile_{owner_id}_{file_id}"
-                        encoded_file_link = base64.urlsafe_b64encode(file_link_data.encode("ascii")).decode().strip("=")
+                        encoded_file_link = b64_encode(file_link_data)
                         link = f"https://t.me/{username}?start={encoded_file_link}"
                         text += f"• <a href='{link}'>{file_name}</a>\n"
                     else:
@@ -3976,7 +3975,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             # Back button - go to parent folder if exists
             if '/' in current_path:
                 parent_path = '/'.join(current_path.split('/')[:-1])
-                parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                parent_encoded = b64_encode(parent_path, "utf-8")
                 buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
             
             # Convert buttons to raw API format and add copy link buttons
@@ -4033,7 +4032,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             try:
                 owner_id = int(parts[0])
                 encoded_path = parts[1]
-                folder_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                folder_path = b64_decode(encoded_path, "utf-8")
             except:
                 await query.answer("Error decoding folder path", show_alert=True)
                 return
@@ -4044,7 +4043,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             
             if is_protected and access_key not in VERIFIED_FOLDER_ACCESS:
                 display_name = await db.get_folder_display_name(folder_path)
-                encoded_folder = base64.urlsafe_b64encode(folder_path.encode("utf-8")).decode().strip("=")
+                encoded_folder = b64_encode(folder_path, "utf-8")
                 CAPTION_INPUT_MODE[query.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_folder}"
                 await query.message.reply_text(f"<b>🔐 This folder is password protected</b>\n\n📁 Folder: {display_name}\n\nPlease enter the password to access files:", parse_mode=enums.ParseMode.HTML)
                 await query.answer()
@@ -4060,7 +4059,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     
                     if is_parent_protected and parent_access_key not in VERIFIED_FOLDER_ACCESS:
                         display_name = await db.get_folder_display_name(parent_path)
-                        encoded_parent = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                        encoded_parent = b64_encode(parent_path, "utf-8")
                         CAPTION_INPUT_MODE[query.from_user.id] = f"verify_folder_password_{owner_id}_{encoded_parent}"
                         await query.message.reply_text(f"<b>🔐 Parent folder is password protected</b>\n\n📁 Folder: {display_name}\n\nPlease enter the password to access files:", parse_mode=enums.ParseMode.HTML)
                         await query.answer()
@@ -4171,7 +4170,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             try:
                 owner_id = int(parts[0])
                 encoded_path = parts[1]
-                folder_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                folder_path = b64_decode(encoded_path, "utf-8")
             except:
                 await query.answer("Error decoding folder path", show_alert=True)
                 return
@@ -4268,7 +4267,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 if len(parts) >= 2:
                     owner_id = int(parts[0])
                     encoded_path = parts[1]
-                    current_path = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                    current_path = b64_decode(encoded_path, "utf-8")
                     
                     # Re-render the shared folder view
                     display_name = await db.get_folder_display_name(current_path)
@@ -4282,7 +4281,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     
                     # Get All Files button
                     action_row = []
-                    encoded_path_btn = base64.urlsafe_b64encode(current_path.encode("utf-8")).decode().strip("=")
+                    encoded_path_btn = b64_encode(current_path, "utf-8")
                     action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_shared_{owner_id}_{encoded_path_btn}'))
                     buttons.append(action_row)
                     
@@ -4292,7 +4291,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     for f in subfolders:
                         sub_folder_name = f.get('name', str(f)) if isinstance(f, dict) else str(f)
                         sub_display = await db.get_folder_display_name(sub_folder_name)
-                        sub_encoded = base64.urlsafe_b64encode(sub_folder_name.encode("utf-8")).decode().strip("=")
+                        sub_encoded = b64_encode(sub_folder_name, "utf-8")
                         
                         # Check if subfolder has its own password
                         sub_access_key = f"{query.from_user.id}_{owner_id}_{sub_folder_name}"
@@ -4328,7 +4327,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                             file_id = file_obj.get('file_id')
                             if file_id:
                                 file_link_data = f"sharedfile_{owner_id}_{file_id}"
-                                encoded_file_link = base64.urlsafe_b64encode(file_link_data.encode("ascii")).decode().strip("=")
+                                encoded_file_link = b64_encode(file_link_data)
                                 link = f"https://t.me/{username}?start={encoded_file_link}"
                                 text += f"• <a href='{link}'>{file_name}</a>\n"
                             else:
@@ -4347,13 +4346,13 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     # Back button
                     if '/' in current_path:
                         parent_path = '/'.join(current_path.split('/')[:-1])
-                        parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                        parent_encoded = b64_encode(parent_path, "utf-8")
                         buttons.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'shared_folder_{owner_id}_{parent_encoded}')])
                     
                     # Generate share link for copy
                     username = (await client.get_me()).username
                     link_data = f"folder_{owner_id}_{encoded_path_btn}"
-                    encoded_link = base64.urlsafe_b64encode(link_data.encode("ascii")).decode().strip("=")
+                    encoded_link = b64_encode(link_data)
                     share_link = f"https://t.me/{username}?start={encoded_link}"
                     
                     # Convert buttons to raw API format and add copy link buttons
@@ -4490,7 +4489,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             # Add subfolder to existing folder
             encoded_path = query.data[14:]
             try:
-                parent_folder = base64.urlsafe_b64decode(encoded_path + "=" * (-len(encoded_path) % 4)).decode("utf-8")
+                parent_folder = b64_decode(encoded_path, "utf-8")
             except:
                 await query.answer("Error decoding folder path", show_alert=True)
                 return
@@ -4540,7 +4539,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     # Find index in all_files
                     file_idx = all_files.index(file_obj)
                     string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     text += f"{start_idx + display_count}. <a href='{link}'>{file_name}</a>\n\n"
             
@@ -4619,7 +4618,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     display_count += 1
                     file_name = file_obj.get('file_name', 'Unknown')
                     string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     text += f"{start_idx + display_count}. <a href='{link}'>{file_name}</a>\n\n"
             
@@ -4635,16 +4634,16 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             # Add Get All Files and Edit buttons on same row
             action_row = []
             if folder_files:
-                encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                encoded = b64_encode(folder_name, "utf-8")
                 action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_folder_{encoded}'))
             action_row.append(InlineKeyboardButton('✏️ Edit', callback_data=f'edit_folder_{idx}'))
             button_rows.append(action_row)
             
             # Back to browse folder
-            encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+            encoded = b64_encode(folder_name, "utf-8")
             if '/' in folder_name:
                 parent_path = '/'.join(folder_name.split('/')[:-1])
-                parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                parent_encoded = b64_encode(parent_path, "utf-8")
                 button_rows.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'browse_folder_{parent_encoded}')])
             else:
                 button_rows.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data='files_by_folder')])
@@ -4893,7 +4892,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                             string = f'ft_{file_token}'
                         else:
                             string = f'file_{idx}'
-                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                        encoded = b64_encode(string)
                         link = f"https://t.me/{username}?start={encoded}"
                         
                         inline_buttons = [
@@ -5016,7 +5015,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         display_count += 1
                         file_name = file_obj.get('file_name', 'Unknown')
                         string = f'file_{file_idx}'
-                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                        encoded = b64_encode(string)
                         link = f"https://t.me/{username}?start={encoded}"
                         text += f"{start_idx + display_count}. <a href='{link}'>{file_name}</a>\n\n"
                 
@@ -5030,7 +5029,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 # Add Get All Files and Edit buttons on same row
                 action_row = []
                 if folder_files:
-                    folder_encoded = base64.urlsafe_b64encode(folder_name.encode("utf-8")).decode().strip("=")
+                    folder_encoded = b64_encode(folder_name, "utf-8")
                     action_row.append(InlineKeyboardButton('📥 Get All Files', callback_data=f'getall_folder_{folder_encoded}'))
                 action_row.append(InlineKeyboardButton('✏️ Edit', callback_data=f'edit_folder_{idx}'))
                 button_rows.append(action_row)
@@ -5038,7 +5037,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 # Back navigation
                 if '/' in folder_name:
                     parent_path = '/'.join(folder_name.split('/')[:-1])
-                    parent_encoded = base64.urlsafe_b64encode(parent_path.encode("utf-8")).decode().strip("=")
+                    parent_encoded = b64_encode(parent_path, "utf-8")
                     button_rows.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data=f'browse_folder_{parent_encoded}')])
                 else:
                     button_rows.append([InlineKeyboardButton('⋞ ʙᴀᴄᴋ', callback_data='files_by_folder')])
@@ -5145,7 +5144,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 file_name = stored_files[file_idx].get('file_name', 'File')
                 username = (await client.get_me()).username
                 string = f'file_{file_idx}'
-                encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                encoded = b64_encode(string)
                 link = f"https://t.me/{username}?start={encoded}"
                 
                 protected = stored_files[file_idx].get('protected', False)
@@ -5185,7 +5184,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     file_name = stored_files[file_idx].get('file_name', 'File')
                     username = (await client.get_me()).username
                     string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     
                     protected = stored_files[file_idx].get('protected', False)
@@ -5218,7 +5217,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         string = f'ft_{file_token}'
                     else:
                         string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     
                     # Check if file is password protected
@@ -5367,7 +5366,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         file_name = stored_files[file_idx].get('file_name', 'File')
                         username = (await client.get_me()).username
                         string = f'file_{file_idx}'
-                        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                        encoded = b64_encode(string)
                         link = f"https://t.me/{username}?start={encoded}"
                         
                         protected = stored_files[file_idx].get('protected', False)
@@ -5399,7 +5398,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     file_name = stored_files[file_idx].get('file_name', 'File')
                     username = (await client.get_me()).username
                     string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     
                     protected = stored_files[file_idx].get('protected', False)
@@ -5457,7 +5456,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         string = f'ft_{file_token}'
                     else:
                         string = f'file_{file_idx}'
-                    encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+                    encoded = b64_encode(string)
                     link = f"https://t.me/{username}?start={encoded}"
                     
                     # Send link as a message so user can copy it
@@ -5675,7 +5674,7 @@ async def handle_file_upload(client, message):
         
         username = (await client.get_me()).username
         string = f'file_{file_index}'
-        encoded = base64.urlsafe_b64encode(string.encode("ascii")).decode().strip("=")
+        encoded = b64_encode(string)
         link = f"https://t.me/{username}?start={encoded}"
         
         # Create action buttons with Share containing copy/open options
