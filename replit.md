@@ -55,7 +55,15 @@ python bot.py
 ├── core/
 │   ├── bot/            # Bot client setup
 │   └── utils/          # Utility functions
-└── plugins/            # Command handlers
+└── plugins/
+    ├── commands.py     # Main command handlers
+    ├── password.py     # Unified password module for files/folders
+    ├── rawapi.py       # Raw Telegram Bot API helpers
+    ├── dbusers.py      # Database operations
+    ├── admin_settings.py
+    ├── broadcast.py
+    ├── clone.py
+    └── genlink.py
 ```
 
 ## Backup & Restore Feature
