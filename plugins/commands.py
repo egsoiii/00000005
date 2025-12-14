@@ -5361,7 +5361,34 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
             return
         
         elif query.data.startswith("change_file_link_"):
-            # Directly change file link and show original caption
+            # Show confirmation with original caption
+            try:
+                file_idx = int(query.data.split("_")[-1])
+                user = await db.col.find_one({'id': int(query.from_user.id)})
+                stored_files = user.get('stored_files', []) if user else []
+                
+                if 0 <= file_idx < len(stored_files):
+                    file_name = stored_files[file_idx].get('file_name', 'File')
+                    file_caption = stored_files[file_idx].get('caption', None)
+                    
+                    buttons = [
+                        [InlineKeyboardButton('Yes I am 💯 sure', callback_data=f'confirm_change_file_link_{file_idx}')],
+                        [InlineKeyboardButton('Return', callback_data=f'file_share_{file_idx}')]
+                    ]
+                    
+                    if file_caption:
+                        caption = file_caption
+                    else:
+                        caption = f"<b>📄 {file_name}</b>"
+                    await query.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
+                    await query.answer()
+            except Exception as e:
+                logger.error(f"Change file link error: {e}")
+                await query.answer("Error", show_alert=True)
+            return
+        
+        elif query.data.startswith("confirm_change_file_link_"):
+            # Generate new token for file
             try:
                 file_idx = int(query.data.split("_")[-1])
                 new_token = await db.change_file_token(query.from_user.id, file_idx)
@@ -5392,7 +5419,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 else:
                     await query.answer("Error changing link", show_alert=True)
             except Exception as e:
-                logger.error(f"Change file link error: {e}")
+                logger.error(f"Confirm change file link error: {e}")
                 await query.answer("Error", show_alert=True)
             return
         
