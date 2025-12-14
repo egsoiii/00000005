@@ -2255,7 +2255,7 @@ async def handle_user_input(client, message):
 async def callback(client, query):
     try:
         # Answer callback immediately for faster response (unless specific handlers need custom answers)
-        if not query.data.startswith(("stop_batch_", "toggle_clone", "remove_dest_", "toggle_dest_enable_", "sel_folder_", "confirm_del_", "select_topic_", "del_replace_", "del_remove_", "mode_", "file_share_", "change_file_folder_", "view_folder_password_", "confirm_remove_password_", "remove_folder_password_", "confirm_change_link_", "cancel_change_link_", "view_file_password_", "confirm_remove_file_password_", "remove_file_password_", "change_file_link_", "confirm_change_file_link_", "set_file_password_", "set_password_", "view_password_", "confirm_remove_pw_", "remove_password_")):
+        if not query.data.startswith(("stop_batch_", "toggle_clone", "remove_dest_", "toggle_dest_enable_", "sel_folder_", "confirm_del_", "select_topic_", "del_replace_", "del_remove_", "mode_", "file_share_", "change_file_folder_", "select_file_folder_", "view_folder_password_", "confirm_remove_password_", "remove_folder_password_", "confirm_change_link_", "cancel_change_link_", "view_file_password_", "confirm_remove_file_password_", "remove_file_password_", "change_file_link_", "confirm_change_file_link_", "set_file_password_", "set_password_", "view_password_", "confirm_remove_pw_", "remove_password_")):
             await query.answer()
         
         if query.data.startswith("stop_batch_"):
