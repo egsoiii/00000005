@@ -5574,8 +5574,8 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                     file_name = stored_files[file_idx].get('file_name', 'File')
                     
                     buttons = [
-                        [InlineKeyboardButton('✅ Yes, Change Link', callback_data=f'confirm_change_file_link_{file_idx}'), 
-                         InlineKeyboardButton('❌ Cancel', callback_data=f'file_share_{file_idx}')]
+                        [InlineKeyboardButton('Yes I am 💯 sure', callback_data=f'confirm_change_file_link_{file_idx}')],
+                        [InlineKeyboardButton('Return', callback_data=f'file_share_{file_idx}')]
                     ]
                     await query.message.edit_text(
                         f"<b>⚠️ Change File Link?</b>\n\n<b>📄 {file_name}</b>\n\nThis will generate a new link and <b>invalidate the old link</b>.\nAnyone with the old link will no longer be able to access this file.",
@@ -5597,7 +5597,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                 if new_token:
                     await query.answer("✅ Link changed successfully!", show_alert=True)
                     
-                    # Go back to main file menu (like folders do)
+                    # Go back to main file menu with original caption
                     user = await db.col.find_one({'id': int(query.from_user.id)})
                     stored_files = user.get('stored_files', []) if user else []
                     
@@ -5605,6 +5605,7 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                         file_name = stored_files[file_idx].get('file_name', 'File')
                         protected = stored_files[file_idx].get('protected', False)
                         protect_btn = '🛡️✅ Protected' if protected else '🛡️❌ Protect'
+                        original_caption = stored_files[file_idx].get('caption', None)
                         
                         buttons = [
                             [InlineKeyboardButton('🔗 Share', callback_data=f'file_share_{file_idx}'), InlineKeyboardButton('📁 Change Folder', callback_data=f'change_file_folder_{file_idx}')],
@@ -5612,7 +5613,10 @@ You can generate a new token anytime from the Backup & Restore menu.</b>"""
                             [InlineKeyboardButton('✖️ Close', callback_data=f'close_file_message')]
                         ]
                         
-                        caption = f"<b>✅ File saved!</b>\n\n<b>📄 {file_name}</b>"
+                        if original_caption:
+                            caption = f"<b>✅ File saved!</b>\n\n<b>📄 {file_name}</b>\n\n{original_caption}"
+                        else:
+                            caption = f"<b>✅ File saved!</b>\n\n<b>📄 {file_name}</b>"
                         await query.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
                 else:
                     await query.answer("Error changing link", show_alert=True)
